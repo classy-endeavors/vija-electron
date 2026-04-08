@@ -1,10 +1,10 @@
 import { useEffect, useState, type ReactElement } from 'react'
 import type { TabKey } from '../shared/tab'
 import { parseTabQuery } from '../shared/tab'
-import { HomeTab } from './tabs/HomeTab'
-import { ContextTab } from './tabs/ContextTab'
-import { SubscriptionTab } from './tabs/SubscriptionTab'
-import { SettingsTab } from './tabs/SettingsTab'
+import { HomeTab } from '@renderer/tabs/HomeTab'
+import { ContextTab } from '@renderer/tabs/ContextTab'
+import { SubscriptionTab } from '@renderer/tabs/SubscriptionTab'
+import { SettingsTab } from '@renderer/tabs/SettingsTab'
 
 const TAB_LABELS: Record<TabKey, string> = {
   home: 'Home',
@@ -22,10 +22,15 @@ export function App(): ReactElement {
   const [activeTab, setActiveTab] = useState<TabKey>(fromUrl ?? 'home')
 
   useEffect(() => {
-    const unsubOpen = window.vijia.onOpenWindow((payload) => {
+    const api = window.vijia
+    if (!api) {
+      console.warn('[Vijia] preload missing: window.vijia is undefined')
+      return
+    }
+    const unsubOpen = api.onOpenWindow((payload) => {
       setActiveTab(payload.tab)
     })
-    const unsubTray = window.vijia.onTrayAction(() => {
+    const unsubTray = api.onTrayAction(() => {
       /* Optional: reflect pause/resume in UI when product logic is added */
     })
     return () => {

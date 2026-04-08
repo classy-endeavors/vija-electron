@@ -4,7 +4,8 @@ type VijiaTabKey = 'home' | 'context' | 'subscription' | 'settings'
 
 declare global {
   interface Window {
-    vijia: {
+    /** Exposed by preload; may be missing if preload failed to load. */
+    vijia?: {
       onOpenWindow: (
         callback: (payload: { tab: VijiaTabKey }) => void
       ) => () => void

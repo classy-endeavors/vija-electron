@@ -11,7 +11,7 @@ import type { TabKey } from '../shared/tab'
 let tray: Tray | null = null
 
 function trayIconPath(): string {
-  return path.join(app.getAppPath(), 'assets', 'tray-icon.png')
+  return path.join(app.getAppPath(), 'assets', 'letter-v.png')
 }
 
 export function createTray(): void {
