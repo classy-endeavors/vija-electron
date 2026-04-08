@@ -1,0 +1,105 @@
+import { BrowserWindow, app } from 'electron'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import type { TabKey } from '../shared/tab'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+
+let mainWindow: BrowserWindow | null = null
+let isQuitting = false
+
+function getPreloadPath(): string {
+  return path.join(__dirname, '../preload/preload.mjs')
+}
+
+export function setQuitting(value: boolean): void {
+  isQuitting = value
+}
+
+export function getMainWindow(): BrowserWindow | null {
+  return mainWindow
+}
+
+function buildRendererUrl(rendererUrl: string, tab?: TabKey): string {
+  const u = new URL(rendererUrl)
+  if (tab) {
+    u.searchParams.set('tab', tab)
+  }
+  return u.href
+}
+
+export function getOrCreateMainWindow(initialTab?: TabKey): BrowserWindow {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    return mainWindow
+  }
+
+  mainWindow = new BrowserWindow({
+    width: 900,
+    height: 620,
+    show: false,
+    center: true,
+    resizable: true,
+    webPreferences: {
+      preload: getPreloadPath(),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  })
+
+  mainWindow.on('close', (event) => {
+    if (!isQuitting) {
+      event.preventDefault()
+      mainWindow?.hide()
+      if (process.platform === 'darwin') {
+        app.dock?.hide()
+      }
+    }
+  })
+
+  const rendererUrl = process.env['ELECTRON_RENDERER_URL']
+  if (rendererUrl) {
+    void mainWindow.loadURL(buildRendererUrl(rendererUrl, initialTab))
+  } else {
+    const indexHtml = path.join(__dirname, '../renderer/index.html')
+    if (initialTab) {
+      void mainWindow.loadFile(indexHtml, {
+        query: { tab: initialTab }
+      })
+    } else {
+      void mainWindow.loadFile(indexHtml)
+    }
+  }
+
+  return mainWindow
+}
+
+export function showMainWindow(tab?: TabKey): void {
+  const t = tab ?? 'home'
+  const existed = mainWindow !== null && !mainWindow.isDestroyed()
+
+  if (!existed) {
+    getOrCreateMainWindow(t)
+    const win = mainWindow!
+    win.show()
+    if (process.platform === 'darwin') {
+      app.dock?.show()
+    }
+    win.focus()
+    return
+  }
+
+  const win = mainWindow!
+  win.show()
+  if (process.platform === 'darwin') {
+    app.dock?.show()
+  }
+  win.focus()
+  win.webContents.send('open-window', { tab: t })
+}
+
+export function destroyAllWindows(): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.destroy()
+    mainWindow = null
+  }
+}
