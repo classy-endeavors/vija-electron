@@ -1,0 +1,3 @@
+# Stub for repository structure / future packaging (no installer required for the test task).
+appId: com.vijia.app
+productName: Vijia
