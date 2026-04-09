@@ -27,6 +27,7 @@ declare global {
       onGuideMode?: (callback: (payload: GuideModePayload) => void) => () => void
       dismiss?: (id: string) => void
       submitPrompt?: (text: string) => void
+      /** Overlay: maps to `set-ignore-mouse` — when true, mouse events are ignored (pass-through). */
       setIgnoreMouse?: (ignore: boolean) => void
     }
   }

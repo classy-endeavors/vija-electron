@@ -28,6 +28,11 @@ export default defineConfig({
         input: {
           preload: resolve('src/preload/preload.ts'),
           overlayPreload: resolve('src/preload/overlayPreload.ts')
+        },
+        /** ESM .mjs preloads fail in Electron preload VM ("Cannot use import statement outside a module"). CJS is reliable. */
+        output: {
+          format: 'cjs',
+          entryFileNames: '[name].cjs'
         }
       }
     }

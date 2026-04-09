@@ -7,6 +7,7 @@ import {
   showMainWindow
 } from './windowManager'
 import { simulateTestNotification } from './NotificationManager'
+import { IPC_CHANNELS } from '../shared/ipcChannels'
 import type { TabKey } from '../shared/tab'
 
 let tray: Tray | null = null
@@ -36,14 +37,18 @@ export function createTray(): void {
       label: 'Pause',
       click: (): void => {
         console.log('[Vijia] Pause (placeholder)')
-        getMainWindow()?.webContents.send('tray-action', { action: 'pause' })
+        getMainWindow()?.webContents.send(IPC_CHANNELS.TRAY_ACTION, {
+          action: 'pause'
+        })
       }
     },
     {
       label: 'Resume',
       click: (): void => {
         console.log('[Vijia] Resume (placeholder)')
-        getMainWindow()?.webContents.send('tray-action', { action: 'resume' })
+        getMainWindow()?.webContents.send(IPC_CHANNELS.TRAY_ACTION, {
+          action: 'resume'
+        })
       }
     },
     {

@@ -1,9 +1,23 @@
 /* M2 layout — visual polish out of scope; functional spacing and layering only */
 
-body {
+/*
+ * Clear the host app status bar (~22–25px) plus margin so the FAB does not sit on it.
+ * Adjust if your shell uses a taller bottom chrome.
+ */
+:root {
+  --overlay-safe-bottom: 36px;
+  --overlay-safe-right: 12px;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
   margin: 0;
   overflow: hidden;
   background: transparent;
+  /* Let clicks pass through empty space; interactive bits use .overlay-hit */
+  pointer-events: none;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
 }
 
@@ -15,12 +29,13 @@ body {
 
 .overlay-column {
   position: absolute;
-  bottom: 12px;
-  right: 12px;
+  bottom: var(--overlay-safe-bottom);
+  right: var(--overlay-safe-right);
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 4px;
+  /* Flush stack → prompt → circle; 4px gap is only between cards inside .notification-stack */
+  gap: 0;
   pointer-events: none;
 }
 
@@ -77,6 +92,7 @@ body {
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
+  overflow: visible;
 }
 
 .notification-card--older {
@@ -147,6 +163,7 @@ body {
   border-radius: 50%;
   background: #ecfdf5;
   box-shadow: 0 0 10px #a7f3d0;
+  pointer-events: none;
 }
 
 .prompt-box {

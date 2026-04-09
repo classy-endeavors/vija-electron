@@ -1,13 +1,41 @@
 import { BrowserWindow, ipcMain, screen } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { IPC_CHANNELS } from '../shared/ipcChannels'
+import {
+  resetOverlayNotificationDelivery,
+  setOverlayDeliveryReady,
+  syncGuideModeToOverlay
+} from './NotificationManager'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 let overlayWindow: BrowserWindow | null = null
 
+let overlayInputIpcRegistered = false
+
+/** Register once at app startup (before overlay loads). */
+export function registerOverlayInputIpc(): void {
+  if (overlayInputIpcRegistered) {
+    return
+  }
+  overlayInputIpcRegistered = true
+
+  ipcMain.on(
+    IPC_CHANNELS.SET_IGNORE_MOUSE,
+    (event, payload: { ignore: boolean }) => {
+      const ow = getOverlayWindow()
+      if (!ow || ow.isDestroyed() || event.sender !== ow.webContents) {
+        return
+      }
+      const ignore = Boolean(payload?.ignore)
+      ow.setIgnoreMouseEvents(ignore, { forward: true })
+    }
+  )
+}
+
 function getOverlayPreloadPath(): string {
-  return path.join(__dirname, '../preload/overlayPreload.mjs')
+  return path.join(__dirname, '../preload/overlayPreload.cjs')
 }
 
 function overlayRendererUrl(): string | undefined {
@@ -33,13 +61,13 @@ export function getOrCreateOverlayWindow(): BrowserWindow {
     return overlayWindow
   }
 
-  const { x, y, width, height } = screen.getPrimaryDisplay().workArea
+  const wa = screen.getPrimaryDisplay().workArea
 
   overlayWindow = new BrowserWindow({
-    x,
-    y,
-    width,
-    height,
+    x: wa.x,
+    y: wa.y,
+    width: wa.width,
+    height: wa.height,
     frame: false,
     transparent: true,
     hasShadow: false,
@@ -55,7 +83,9 @@ export function getOrCreateOverlayWindow(): BrowserWindow {
     webPreferences: {
       preload: getOverlayPreloadPath(),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      // Preload imports a local bundled chunk; sandboxed preload can fail to load it.
+      sandbox: false
     }
   })
 
@@ -63,7 +93,8 @@ export function getOrCreateOverlayWindow(): BrowserWindow {
     overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   }
 
-  overlayWindow.setIgnoreMouseEvents(true, { forward: true })
+  // Start interactive so first click is capturable even before first mousemove sync.
+  overlayWindow.setIgnoreMouseEvents(false, { forward: true })
 
   const devUrl = overlayRendererUrl()
   if (devUrl) {
@@ -73,8 +104,14 @@ export function getOrCreateOverlayWindow(): BrowserWindow {
     void overlayWindow.loadFile(htmlPath)
   }
 
+  overlayWindow.webContents.on('did-finish-load', () => {
+    setOverlayDeliveryReady(true)
+    syncGuideModeToOverlay()
+  })
+
   overlayWindow.on('closed', () => {
     overlayWindow = null
+    resetOverlayNotificationDelivery()
   })
 
   return overlayWindow
@@ -85,18 +122,5 @@ export function destroyOverlayWindow(): void {
     overlayWindow.destroy()
   }
   overlayWindow = null
+  resetOverlayNotificationDelivery()
 }
-
-function registerSetIgnoreMouseHandler(): void {
-  ipcMain.on(
-    'set-ignore-mouse',
-    (event, payload: { ignore: boolean }) => {
-      const win = getOverlayWindow()
-      if (!win || win.isDestroyed()) return
-      if (event.sender !== win.webContents) return
-      win.setIgnoreMouseEvents(payload.ignore, { forward: true })
-    }
-  )
-}
-
-registerSetIgnoreMouseHandler()

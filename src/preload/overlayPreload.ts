@@ -1,43 +1,66 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import { IPC_CHANNELS } from '../shared/ipcChannels'
 import type { GuideModePayload, OverlayNotificationPayload } from '../shared/notification'
+
+/** Single IPC listener + buffer so main can push before React mounts (dev HMR / slow bundle). */
+let notificationCallback: ((payload: OverlayNotificationPayload) => void) | null = null
+const notificationBuffer: OverlayNotificationPayload[] = []
+
+ipcRenderer.on(
+  IPC_CHANNELS.VIJIA_NOTIFICATION,
+  (_event, payload: OverlayNotificationPayload) => {
+    if (notificationCallback) {
+      notificationCallback(payload)
+    } else {
+      notificationBuffer.push(payload)
+    }
+  }
+)
+
+let guideCallback: ((payload: GuideModePayload) => void) | null = null
+let guideBuffered: GuideModePayload | null = null
+
+ipcRenderer.on(IPC_CHANNELS.VIJIA_GUIDE_MODE, (_event, payload: GuideModePayload) => {
+  if (guideCallback) {
+    guideCallback(payload)
+  } else {
+    guideBuffered = payload
+  }
+})
 
 contextBridge.exposeInMainWorld('vijia', {
   onNotification: (
     callback: (payload: OverlayNotificationPayload) => void
   ): (() => void) => {
-    const handler = (
-      _event: Electron.IpcRendererEvent,
-      payload: OverlayNotificationPayload
-    ): void => {
-      callback(payload)
+    notificationCallback = callback
+    while (notificationBuffer.length > 0) {
+      const p = notificationBuffer.shift()
+      if (p) callback(p)
     }
-    ipcRenderer.on('vijia:notification', handler)
     return () => {
-      ipcRenderer.removeListener('vijia:notification', handler)
+      notificationCallback = null
     }
   },
   onGuideMode: (callback: (payload: GuideModePayload) => void): (() => void) => {
-    const handler = (
-      _event: Electron.IpcRendererEvent,
-      payload: GuideModePayload
-    ): void => {
-      callback(payload)
+    guideCallback = callback
+    if (guideBuffered) {
+      callback(guideBuffered)
+      guideBuffered = null
     }
-    ipcRenderer.on('vijia:guide-mode', handler)
     return () => {
-      ipcRenderer.removeListener('vijia:guide-mode', handler)
+      guideCallback = null
     }
   },
   dismiss: (id: string): void => {
-    ipcRenderer.send('vijia:dismiss', { id })
+    ipcRenderer.send(IPC_CHANNELS.VIJIA_DISMISS, { id })
   },
   submitPrompt: (text: string): void => {
-    ipcRenderer.send('vijia:prompt-submit', { text })
+    ipcRenderer.send(IPC_CHANNELS.VIJIA_PROMPT_SUBMIT, { text })
   },
   setGuideMode: (active: boolean): void => {
-    ipcRenderer.send('vijia:set-guide-mode', { active })
+    ipcRenderer.send(IPC_CHANNELS.VIJIA_SET_GUIDE_MODE, { active })
   },
   setIgnoreMouse: (ignore: boolean): void => {
-    ipcRenderer.send('set-ignore-mouse', { ignore })
+    ipcRenderer.send(IPC_CHANNELS.SET_IGNORE_MOUSE, { ignore })
   }
 })

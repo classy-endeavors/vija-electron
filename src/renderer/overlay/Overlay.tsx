@@ -5,23 +5,26 @@ import { NotificationStack } from './NotificationStack'
 import { PromptBox } from './PromptBox'
 import { useOverlayInteractions } from './useOverlayInteractions'
 
+/** Spec: two stacked cards; show the two most recent. */
+const MAX_VISIBLE_NOTIFICATIONS = 2
+
 export function Overlay(): ReactElement {
   const [items, setItems] = useState<OverlayNotificationPayload[]>([])
   const [promptOpen, setPromptOpen] = useState(false)
   const [guideMode, setGuideMode] = useState(false)
   const [stackFaded, setStackFaded] = useState(false)
+  const [hoveredOlderId, setHoveredOlderId] = useState<string | null>(null)
 
-  const circleRef = useRef<HTMLButtonElement>(null)
+  const promptSourceRef = useRef<'none' | 'circle' | 'hover'>('none')
+  const promptLeaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const columnRef = useRef<HTMLDivElement>(null)
   const promptRef = useRef<HTMLDivElement>(null)
-  const cardRefs = useRef(new Map<string, HTMLDivElement | null>())
 
-  const registerCardRef = useCallback((id: string, el: HTMLDivElement | null) => {
-    if (el) {
-      cardRefs.current.set(id, el)
-    } else {
-      cardRefs.current.delete(id)
-    }
-  }, [])
+  const visibleItems =
+    items.length <= MAX_VISIBLE_NOTIFICATIONS
+      ? items
+      : items.slice(-MAX_VISIBLE_NOTIFICATIONS)
 
   useEffect(() => {
     const api = window.vijia
@@ -31,6 +34,7 @@ export function Overlay(): ReactElement {
     }
     const offNotify = api.onNotification((payload) => {
       setItems((prev) => [...prev, payload])
+      setStackFaded(false)
     })
     const offGuide = api.onGuideMode(({ active }) => {
       setGuideMode(active)
@@ -53,17 +57,58 @@ export function Overlay(): ReactElement {
     window.vijia?.setGuideMode?.(true)
   }, [])
 
-  const getInteractiveElements = useCallback((): (HTMLElement | null)[] => {
-    const circle = circleRef.current
-    const prompt = promptOpen ? promptRef.current : null
-    const cards: (HTMLElement | null)[] = []
-    if (!stackFaded) {
-      for (const it of items) {
-        cards.push(cardRefs.current.get(it.id) ?? null)
+  const clearPromptLeaveTimer = useCallback((): void => {
+    if (promptLeaveTimerRef.current !== null) {
+      clearTimeout(promptLeaveTimerRef.current)
+      promptLeaveTimerRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    if (
+      hoveredOlderId &&
+      !visibleItems.some((i) => i.id === hoveredOlderId)
+    ) {
+      setHoveredOlderId(null)
+      if (promptSourceRef.current === 'hover') {
+        clearPromptLeaveTimer()
+        setPromptOpen(false)
+        promptSourceRef.current = 'none'
       }
     }
-    return [circle, prompt, ...cards]
-  }, [items, promptOpen, stackFaded])
+  }, [visibleItems, hoveredOlderId, clearPromptLeaveTimer])
+
+  const onHoveredOlderChange = useCallback(
+    (id: string | null) => {
+      setHoveredOlderId(id)
+      if (id !== null) {
+        clearPromptLeaveTimer()
+        setPromptOpen(true)
+        if (promptSourceRef.current === 'none') {
+          promptSourceRef.current = 'hover'
+        }
+        return
+      }
+      clearPromptLeaveTimer()
+      promptLeaveTimerRef.current = setTimeout(() => {
+        promptLeaveTimerRef.current = null
+        if (promptSourceRef.current === 'hover') {
+          setPromptOpen(false)
+          promptSourceRef.current = 'none'
+        }
+      }, 200)
+    },
+    [clearPromptLeaveTimer]
+  )
+
+  const onPromptRootEnter = useCallback(() => {
+    clearPromptLeaveTimer()
+  }, [clearPromptLeaveTimer])
+
+  /** Single rect for the whole stack + prompt + FAB so hit-test matches layout and gaps. */
+  const getInteractiveElements = useCallback((): (HTMLElement | null)[] => {
+    return [columnRef.current]
+  }, [promptOpen, items.length])
 
   useOverlayInteractions({
     getInteractiveElements,
@@ -72,26 +117,39 @@ export function Overlay(): ReactElement {
   })
 
   const togglePrompt = useCallback(() => {
-    setPromptOpen((p) => !p)
-  }, [])
+    clearPromptLeaveTimer()
+    setPromptOpen((p) => {
+      const next = !p
+      promptSourceRef.current = next ? 'circle' : 'none'
+      return next
+    })
+  }, [clearPromptLeaveTimer])
+
+  const closePrompt = useCallback(() => {
+    clearPromptLeaveTimer()
+    setPromptOpen(false)
+    promptSourceRef.current = 'none'
+  }, [clearPromptLeaveTimer])
 
   return (
     <div className="overlay-root">
-      <div className="overlay-column">
+      <div ref={columnRef} className="overlay-column">
         <NotificationStack
-          items={items}
+          items={visibleItems}
           guideMode={guideMode}
           stackFaded={stackFaded}
+          hoveredOlderId={hoveredOlderId}
+          onHoveredOlderChange={onHoveredOlderChange}
           onDismiss={onDismiss}
           onGuide={onGuide}
-          registerCardRef={registerCardRef}
         />
         <PromptBox
           open={promptOpen}
-          onClose={() => setPromptOpen(false)}
+          onClose={closePrompt}
           rootRef={promptRef}
+          onRootPointerEnter={onPromptRootEnter}
         />
-        <Circle ref={circleRef} onTogglePrompt={togglePrompt} />
+        <Circle onTogglePrompt={togglePrompt} />
       </div>
     </div>
   )

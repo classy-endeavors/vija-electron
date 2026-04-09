@@ -1,8 +1,4 @@
-import {
-  forwardRef,
-  type ReactElement,
-  type Ref
-} from 'react'
+import type { ReactElement } from 'react'
 import type { NotificationAction, OverlayNotificationPayload } from '../../shared/notification'
 
 const DEFAULT_ACTIONS: NotificationAction[] = [
@@ -25,18 +21,15 @@ type Props = {
   onHoverOlder: (hover: boolean) => void
 }
 
-export const NotificationCard = forwardRef(function NotificationCard(
-  {
-    item,
-    isNewest,
-    expandedOlder,
-    guideMode,
-    onDismiss,
-    onGuide,
-    onHoverOlder
-  }: Props,
-  ref: Ref<HTMLDivElement>
-): ReactElement {
+export function NotificationCard({
+  item,
+  isNewest,
+  expandedOlder,
+  guideMode,
+  onDismiss,
+  onGuide,
+  onHoverOlder
+}: Props): ReactElement {
   const actions = item.actions?.length ? item.actions : DEFAULT_ACTIONS
   const showFull =
     isNewest || expandedOlder
@@ -46,7 +39,6 @@ export const NotificationCard = forwardRef(function NotificationCard(
 
   return (
     <div
-      ref={ref}
       className={`notification-card overlay-hit${guideMode ? ' notification-card--guide' : ''}${
         !isNewest ? ' notification-card--older' : ''
       }${!isNewest && expandedOlder ? ' notification-card--expanded' : ''}`}
@@ -94,6 +86,4 @@ export const NotificationCard = forwardRef(function NotificationCard(
       ) : null}
     </div>
   )
-})
-
-NotificationCard.displayName = 'NotificationCard'
+}

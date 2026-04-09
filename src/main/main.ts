@@ -1,14 +1,15 @@
 import { app } from 'electron'
 import { createTray } from './tray'
-import { getOrCreateOverlayWindow } from './overlayManager'
-import { registerNotificationIpc, syncGuideModeToOverlay } from './NotificationManager'
+import {
+  getOrCreateOverlayWindow,
+  registerOverlayInputIpc
+} from './overlayManager'
+import { registerNotificationIpc } from './NotificationManager'
 
 void app.whenReady().then(() => {
   registerNotificationIpc()
-  const overlay = getOrCreateOverlayWindow()
-  overlay.webContents.once('did-finish-load', () => {
-    syncGuideModeToOverlay()
-  })
+  registerOverlayInputIpc()
+  getOrCreateOverlayWindow()
   createTray()
 })
 

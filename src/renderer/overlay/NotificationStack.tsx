@@ -1,4 +1,4 @@
-import { useCallback, useState, type ReactElement } from 'react'
+import type { ReactElement } from 'react'
 import type { OverlayNotificationPayload } from '../../shared/notification'
 import { NotificationCard } from './NotificationCard'
 
@@ -6,28 +6,21 @@ type Props = {
   items: OverlayNotificationPayload[]
   guideMode: boolean
   stackFaded: boolean
+  hoveredOlderId: string | null
+  onHoveredOlderChange: (id: string | null) => void
   onDismiss: (id: string) => void
   onGuide: () => void
-  registerCardRef: (id: string, el: HTMLDivElement | null) => void
 }
 
 export function NotificationStack({
   items,
   guideMode,
   stackFaded,
+  hoveredOlderId,
+  onHoveredOlderChange,
   onDismiss,
-  onGuide,
-  registerCardRef
+  onGuide
 }: Props): ReactElement {
-  const [hoveredOlderId, setHoveredOlderId] = useState<string | null>(null)
-
-  const setRef = useCallback(
-    (id: string) => (el: HTMLDivElement | null) => {
-      registerCardRef(id, el)
-    },
-    [registerCardRef]
-  )
-
   return (
     <div
       className={`notification-stack${stackFaded ? ' notification-stack--faded' : ''}`}
@@ -41,7 +34,6 @@ export function NotificationStack({
         return (
           <NotificationCard
             key={item.id}
-            ref={setRef(item.id)}
             item={item}
             isNewest={isNewest}
             expandedOlder={expandedOlder}
@@ -49,7 +41,7 @@ export function NotificationStack({
             onDismiss={() => onDismiss(item.id)}
             onGuide={onGuide}
             onHoverOlder={(hover) => {
-              setHoveredOlderId(hover ? item.id : null)
+              onHoveredOlderChange(hover ? item.id : null)
             }}
           />
         )
