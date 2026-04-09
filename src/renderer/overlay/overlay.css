@@ -1,0 +1,190 @@
+/* M2 layout — visual polish out of scope; functional spacing and layering only */
+
+body {
+  margin: 0;
+  overflow: hidden;
+  background: transparent;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+}
+
+.overlay-root {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+.overlay-column {
+  position: absolute;
+  bottom: 12px;
+  right: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.overlay-hit {
+  pointer-events: auto;
+}
+
+.notification-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  max-width: min(360px, calc(100vw - 24px));
+  transition: opacity 0.45s ease;
+}
+
+.notification-stack--faded {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.notification-card {
+  background: rgba(15, 23, 42, 0.92);
+  color: #f8fafc;
+  border-radius: 8px;
+  padding: 10px 12px;
+  min-width: 220px;
+  border: 2px solid transparent;
+}
+
+.notification-card--guide {
+  border-color: #14b8a6;
+}
+
+.notification-card__context {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  margin-bottom: 6px;
+}
+
+.notification-card__code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.75rem;
+  background: rgba(0, 0, 0, 0.35);
+  padding: 8px;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.notification-card__body {
+  font-size: 0.875rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.notification-card--older {
+  opacity: 0.3;
+  transition: opacity 0.2s ease;
+}
+
+.notification-card--older:hover,
+.notification-card--older.notification-card--expanded {
+  opacity: 1;
+}
+
+.notification-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.btn-guide {
+  appearance: none;
+  border: 1px solid #14b8a6;
+  background: transparent;
+  color: #5eead4;
+  font: inherit;
+  font-size: 0.8125rem;
+  padding: 4px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.btn-guide:hover {
+  background: rgba(20, 184, 166, 0.15);
+}
+
+.link-dismiss {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 0;
+}
+
+.link-dismiss:hover {
+  color: #cbd5e1;
+}
+
+.vijia-circle {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 50%, #5eead4 0%, #0d9488 55%, #042f2e 100%);
+  box-shadow: 0 0 16px rgba(45, 212, 191, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border: none;
+  padding: 0;
+}
+
+.vijia-circle__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ecfdf5;
+  box-shadow: 0 0 10px #a7f3d0;
+}
+
+.prompt-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(15, 23, 42, 0.95);
+  border-radius: 999px;
+  padding: 6px 6px 6px 14px;
+  min-width: 280px;
+}
+
+.prompt-box__input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  color: #f8fafc;
+  font: inherit;
+  font-size: 0.875rem;
+  outline: none;
+}
+
+.prompt-box__send {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: #14b8a6;
+  color: #042f2e;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.prompt-box__send:hover {
+  filter: brightness(1.08);
+}

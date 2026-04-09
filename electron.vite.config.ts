@@ -22,13 +22,29 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin()]
   },
   preload: {
-    plugins: [externalizeDepsPlugin()]
+    plugins: [externalizeDepsPlugin()],
+    build: {
+      rollupOptions: {
+        input: {
+          preload: resolve('src/preload/preload.ts'),
+          overlayPreload: resolve('src/preload/overlayPreload.ts')
+        }
+      }
+    }
   },
   renderer: {
     plugins: [react(), electronRendererStripCrossorigin()],
+    build: {
+      rollupOptions: {
+        input: {
+          index: resolve('src/renderer/index.html'),
+          overlay: resolve('src/renderer/overlay.html')
+        }
+      }
+    },
     resolve: {
       alias: {
-        '@renderer': resolve('src/renderer')
+        '@renderer': resolve('src/renderer/main-window')
       }
     }
   }

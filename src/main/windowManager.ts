@@ -2,6 +2,7 @@ import { BrowserWindow, app } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { TabKey } from '../shared/tab'
+import { destroyOverlayWindow } from './overlayManager'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -98,6 +99,7 @@ export function showMainWindow(tab?: TabKey): void {
 }
 
 export function destroyAllWindows(): void {
+  destroyOverlayWindow()
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.destroy()
     mainWindow = null

@@ -1,17 +1,33 @@
 /// <reference types="vite/client" />
 
+import type { NotifyPayload, NotificationRecord } from '../shared/notification'
+
 type VijiaTabKey = 'home' | 'context' | 'subscription' | 'settings'
+
+type GuideModePayload = { active: boolean }
+
+type OverlayNotificationPayload = import('../shared/notification').OverlayNotificationPayload
 
 declare global {
   interface Window {
-    /** Exposed by preload; may be missing if preload failed to load. */
+    /** Main window: open/tray + notify APIs. Overlay: overlay-only APIs. */
     vijia?: {
-      onOpenWindow: (
+      onOpenWindow?: (
         callback: (payload: { tab: VijiaTabKey }) => void
       ) => () => void
-      onTrayAction: (
+      onTrayAction?: (
         callback: (payload: { action: 'pause' | 'resume' }) => void
       ) => () => void
+      notify?: (payload: NotifyPayload) => void
+      getHistory?: () => Promise<NotificationRecord[]>
+      setGuideMode?: (active: boolean) => void
+      onNotification?: (
+        callback: (payload: OverlayNotificationPayload) => void
+      ) => () => void
+      onGuideMode?: (callback: (payload: GuideModePayload) => void) => () => void
+      dismiss?: (id: string) => void
+      submitPrompt?: (text: string) => void
+      setIgnoreMouse?: (ignore: boolean) => void
     }
   }
 }
