@@ -1,7 +1,9 @@
 import { BrowserWindow, app } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { IPC_CHANNELS } from '../shared/ipcChannels'
 import type { TabKey } from '../shared/tab'
+import { destroyOverlayWindow } from './overlayManager'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -9,7 +11,7 @@ let mainWindow: BrowserWindow | null = null
 let isQuitting = false
 
 function getPreloadPath(): string {
-  return path.join(__dirname, '../preload/preload.mjs')
+  return path.join(__dirname, '../preload/preload.cjs')
 }
 
 export function setQuitting(value: boolean): void {
@@ -42,7 +44,9 @@ export function getOrCreateMainWindow(initialTab?: TabKey): BrowserWindow {
     webPreferences: {
       preload: getPreloadPath(),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      // Keep preload behavior consistent with overlay window.
+      sandbox: false
     }
   })
 
@@ -94,10 +98,11 @@ export function showMainWindow(tab?: TabKey): void {
     app.dock?.show()
   }
   win.focus()
-  win.webContents.send('open-window', { tab: t })
+  win.webContents.send(IPC_CHANNELS.OPEN_WINDOW, { tab: t })
 }
 
 export function destroyAllWindows(): void {
+  destroyOverlayWindow()
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.destroy()
     mainWindow = null

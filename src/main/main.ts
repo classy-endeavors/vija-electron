@@ -1,7 +1,15 @@
 import { app } from 'electron'
 import { createTray } from './tray'
+import {
+  getOrCreateOverlayWindow,
+  registerOverlayInputIpc
+} from './overlayManager'
+import { registerNotificationIpc } from './NotificationManager'
 
 void app.whenReady().then(() => {
+  registerNotificationIpc()
+  registerOverlayInputIpc()
+  getOrCreateOverlayWindow()
   createTray()
 })
 

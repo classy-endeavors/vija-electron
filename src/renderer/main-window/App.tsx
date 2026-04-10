@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactElement } from 'react'
-import type { TabKey } from '../shared/tab'
-import { parseTabQuery } from '../shared/tab'
+import type { TabKey } from '../../shared/tab'
+import { parseTabQuery } from '../../shared/tab'
 import { HomeTab } from '@renderer/tabs/HomeTab'
 import { ContextTab } from '@renderer/tabs/ContextTab'
 import { SubscriptionTab } from '@renderer/tabs/SubscriptionTab'
@@ -25,6 +25,9 @@ export function App(): ReactElement {
     const api = window.vijia
     if (!api) {
       console.warn('[Vijia] preload missing: window.vijia is undefined')
+      return
+    }
+    if (!api.onOpenWindow || !api.onTrayAction) {
       return
     }
     const unsubOpen = api.onOpenWindow((payload) => {
