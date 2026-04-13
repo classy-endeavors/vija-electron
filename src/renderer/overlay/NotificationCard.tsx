@@ -14,40 +14,27 @@ function firstLine(message: string): string {
 type Props = {
   item: OverlayNotificationPayload
   isNewest: boolean
-  expandedOlder: boolean
   guideMode: boolean
   onDismiss: () => void
   onGuide: () => void
-  onHoverOlder: (hover: boolean) => void
 }
 
 export function NotificationCard({
   item,
   isNewest,
-  expandedOlder,
   guideMode,
   onDismiss,
-  onGuide,
-  onHoverOlder
+  onGuide
 }: Props): ReactElement {
   const actions = item.actions?.length ? item.actions : DEFAULT_ACTIONS
-  const showFull =
-    isNewest || expandedOlder
-
-  const bodyText = showFull ? item.message : firstLine(item.message)
-  const collapsedOlder = !isNewest && !expandedOlder
+  const bodyText = isNewest ? item.message : firstLine(item.message)
+  const collapsedOlder = !isNewest
 
   return (
     <div
       className={`notification-card overlay-hit${guideMode ? ' notification-card--guide' : ''}${
         !isNewest ? ' notification-card--older' : ''
-      }${!isNewest && expandedOlder ? ' notification-card--expanded' : ''}`}
-      onMouseEnter={() => {
-        if (!isNewest) onHoverOlder(true)
-      }}
-      onMouseLeave={() => {
-        if (!isNewest) onHoverOlder(false)
-      }}
+      }`}
     >
       {!collapsedOlder && item.contextSource ? (
         <div className="notification-card__context">{item.contextSource}</div>

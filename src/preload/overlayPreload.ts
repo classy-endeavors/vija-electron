@@ -62,5 +62,11 @@ contextBridge.exposeInMainWorld('vijia', {
   },
   setIgnoreMouse: (ignore: boolean): void => {
     ipcRenderer.send(IPC_CHANNELS.SET_IGNORE_MOUSE, { ignore })
+  },
+  setOverlayOpen: (open: boolean): void => {
+    ipcRenderer.send(IPC_CHANNELS.VIJIA_OVERLAY_TOGGLE, { open })
+  },
+  setFadeState: (faded: boolean): void => {
+    ipcRenderer.send(IPC_CHANNELS.VIJIA_FADE_STATE, { faded })
   }
 })

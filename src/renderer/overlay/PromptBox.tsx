@@ -10,15 +10,12 @@ type Props = {
   open: boolean
   onClose: () => void
   rootRef: Ref<HTMLDivElement>
-  /** Cancels delayed close when pointer moves from an older card into the prompt. */
-  onRootPointerEnter?: () => void
 }
 
 export function PromptBox({
   open,
   onClose,
-  rootRef,
-  onRootPointerEnter
+  rootRef
 }: Props): ReactElement | null {
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -55,11 +52,7 @@ export function PromptBox({
   if (!open) return null
 
   return (
-    <div
-      ref={rootRef}
-      className="prompt-box overlay-hit"
-      onPointerEnter={onRootPointerEnter}
-    >
+    <div ref={rootRef} className="prompt-box overlay-hit">
       <input
         ref={inputRef}
         className="prompt-box__input"

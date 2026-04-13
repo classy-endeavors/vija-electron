@@ -1,12 +1,16 @@
-import type { ReactElement } from 'react'
+import { forwardRef, type ReactElement } from 'react'
 
 type Props = {
   onTogglePrompt: () => void
 }
 
-export function Circle({ onTogglePrompt }: Props): ReactElement {
+export const Circle = forwardRef<HTMLButtonElement, Props>(function Circle(
+  { onTogglePrompt },
+  ref
+): ReactElement {
   return (
     <button
+      ref={ref}
       type="button"
       className="vijia-circle overlay-hit"
       aria-label="Toggle Vijia prompt"
@@ -15,4 +19,4 @@ export function Circle({ onTogglePrompt }: Props): ReactElement {
       <span className="vijia-circle__dot" aria-hidden />
     </button>
   )
-}
+})

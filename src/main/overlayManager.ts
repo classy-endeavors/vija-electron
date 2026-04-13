@@ -13,6 +13,28 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 let overlayWindow: BrowserWindow | null = null
 
 let overlayInputIpcRegistered = false
+let lastIgnoreMouse = false
+
+function getOverlayAlwaysOnTopLevel():
+  | 'floating'
+  | 'screen-saver'
+  | 'normal' {
+  if (process.platform === 'darwin') {
+    return 'screen-saver'
+  }
+  if (process.platform === 'win32') {
+    return 'floating'
+  }
+  return 'normal'
+}
+
+function applyOverlayWindowState(win: BrowserWindow): void {
+  const primary = screen.getPrimaryDisplay()
+  const { x, y } = primary.workArea
+  const { width, height } = primary.workAreaSize
+  win.setBounds({ x, y, width, height })
+  win.setAlwaysOnTop(true, getOverlayAlwaysOnTopLevel())
+}
 
 /** Register once at app startup (before overlay loads). */
 export function registerOverlayInputIpc(): void {
@@ -29,7 +51,30 @@ export function registerOverlayInputIpc(): void {
         return
       }
       const ignore = Boolean(payload?.ignore)
+      lastIgnoreMouse = ignore
       ow.setIgnoreMouseEvents(ignore, { forward: true })
+    }
+  )
+
+  ipcMain.on(
+    IPC_CHANNELS.VIJIA_OVERLAY_TOGGLE,
+    (event, _payload: { open: boolean }) => {
+      const ow = getOverlayWindow()
+      if (!ow || ow.isDestroyed() || event.sender !== ow.webContents) {
+        return
+      }
+      applyOverlayWindowState(ow)
+    }
+  )
+
+  ipcMain.on(
+    IPC_CHANNELS.VIJIA_FADE_STATE,
+    (event, _payload: { faded: boolean }) => {
+      const ow = getOverlayWindow()
+      if (!ow || ow.isDestroyed() || event.sender !== ow.webContents) {
+        return
+      }
+      ow.setIgnoreMouseEvents(lastIgnoreMouse, { forward: true })
     }
   )
 }
@@ -61,13 +106,15 @@ export function getOrCreateOverlayWindow(): BrowserWindow {
     return overlayWindow
   }
 
-  const wa = screen.getPrimaryDisplay().workArea
+  const primary = screen.getPrimaryDisplay()
+  const wa = primary.workArea
+  const waSize = primary.workAreaSize
 
   overlayWindow = new BrowserWindow({
     x: wa.x,
     y: wa.y,
-    width: wa.width,
-    height: wa.height,
+    width: waSize.width,
+    height: waSize.height,
     frame: false,
     transparent: true,
     hasShadow: false,
@@ -92,8 +139,14 @@ export function getOrCreateOverlayWindow(): BrowserWindow {
   if (process.platform === 'darwin') {
     overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   }
+  applyOverlayWindowState(overlayWindow)
+  overlayWindow.on('show', () => applyOverlayWindowState(overlayWindow!))
+  overlayWindow.on('restore', () => applyOverlayWindowState(overlayWindow!))
+  overlayWindow.on('enter-full-screen', () => applyOverlayWindowState(overlayWindow!))
+  overlayWindow.on('leave-full-screen', () => applyOverlayWindowState(overlayWindow!))
 
   // Start interactive so first click is capturable even before first mousemove sync.
+  lastIgnoreMouse = false
   overlayWindow.setIgnoreMouseEvents(false, { forward: true })
 
   const devUrl = overlayRendererUrl()

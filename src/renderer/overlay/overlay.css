@@ -7,6 +7,7 @@
 :root {
   --overlay-safe-bottom: 36px;
   --overlay-safe-right: 12px;
+  --hub-height: 420px;
 }
 
 html,
@@ -34,7 +35,7 @@ body,
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  /* Flush stack → prompt → circle; 4px gap is only between cards inside .notification-stack */
+  /* Flush hub → prompt → circle; 4px gap is only between cards inside .notification-hub */
   gap: 0;
   pointer-events: none;
 }
@@ -43,16 +44,23 @@ body,
   pointer-events: auto;
 }
 
-.notification-stack {
+.notification-hub {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 4px;
+  max-height: var(--hub-height);
+  overflow-y: hidden;
+  padding-right: 2px;
   max-width: min(360px, calc(100vw - 24px));
   transition: opacity 0.45s ease;
 }
 
-.notification-stack--faded {
+.notification-hub:hover {
+  overflow-y: auto;
+}
+
+.notification-hub--faded {
   opacity: 0;
   pointer-events: none;
 }
@@ -100,8 +108,7 @@ body,
   transition: opacity 0.2s ease;
 }
 
-.notification-card--older:hover,
-.notification-card--older.notification-card--expanded {
+.notification-card--older:hover {
   opacity: 1;
 }
 

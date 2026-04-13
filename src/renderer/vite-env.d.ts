@@ -29,6 +29,8 @@ declare global {
       submitPrompt?: (text: string) => void
       /** Overlay: maps to `set-ignore-mouse` — when true, mouse events are ignored (pass-through). */
       setIgnoreMouse?: (ignore: boolean) => void
+      setOverlayOpen?: (open: boolean) => void
+      setFadeState?: (faded: boolean) => void
     }
   }
 }

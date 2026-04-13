@@ -23,7 +23,11 @@ export const IPC_CHANNELS = {
   /** Renderer → main (invoke): notification history */
   VIJIA_GET_HISTORY: 'vijia:get-history',
   /** Renderer → main: overlay hit-testing / pass-through */
-  SET_IGNORE_MOUSE: 'set-ignore-mouse'
+  SET_IGNORE_MOUSE: 'set-ignore-mouse',
+  /** Renderer → main: overlay open/close state */
+  VIJIA_OVERLAY_TOGGLE: 'vijia:overlay-toggle',
+  /** Renderer → main: notification hub fade transitions */
+  VIJIA_FADE_STATE: 'vijia:fade-state'
 } as const
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS]

@@ -4,6 +4,7 @@ type Options = {
   /** Bounding element(s) for the bottom-right UI cluster (e.g. `.overlay-column`). */
   getInteractiveElements: () => (HTMLElement | null)[]
   guideMode: boolean
+  hubInteractive: boolean
   onStackFadeChange: (faded: boolean) => void
 }
 
@@ -17,12 +18,15 @@ type Options = {
 export function useOverlayInteractions({
   getInteractiveElements,
   guideMode,
+  hubInteractive,
   onStackFadeChange
 }: Options): void {
   const getElsRef = useRef(getInteractiveElements)
   getElsRef.current = getInteractiveElements
   const guideModeRef = useRef(guideMode)
   guideModeRef.current = guideMode
+  const hubInteractiveRef = useRef(hubInteractive)
+  hubInteractiveRef.current = hubInteractive
   const onStackFadeChangeRef = useRef(onStackFadeChange)
   onStackFadeChangeRef.current = onStackFadeChange
 
@@ -63,7 +67,7 @@ export function useOverlayInteractions({
         return
       }
 
-      if (guideModeRef.current) {
+      if (guideModeRef.current || !hubInteractiveRef.current) {
         clearFadeTimer()
         return
       }
@@ -81,7 +85,7 @@ export function useOverlayInteractions({
     const p = lastClientPointRef.current
     if (p.x < 0) return
     sync(p.x, p.y)
-  }, [getInteractiveElements, guideMode, sync])
+  }, [getInteractiveElements, guideMode, hubInteractive, sync])
 
   useEffect(() => {
     const onMove = (e: MouseEvent): void => {
