@@ -27,7 +27,11 @@ export const IPC_CHANNELS = {
   /** Renderer → main: overlay open/close state */
   VIJIA_OVERLAY_TOGGLE: 'vijia:overlay-toggle',
   /** Renderer → main: notification hub fade transitions */
-  VIJIA_FADE_STATE: 'vijia:fade-state'
+  VIJIA_FADE_STATE: 'vijia:fade-state',
+  /** Main → renderer: a line was appended to session-log.jsonl */
+  VIJIA_NOTE_APPENDED: 'vijia:note-appended',
+  /** Renderer → main: accept / dismiss / fade outcome for suggestion notifications */
+  VIJIA_NOTIFICATION_OUTCOME: 'vijia:notification-outcome'
 } as const
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS]
