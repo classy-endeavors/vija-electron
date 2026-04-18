@@ -15,9 +15,8 @@
     "noFallthroughCasesInSwitch": true,
     "allowImportingTsExtensions": true,
     "types": ["node"],
-    "baseUrl": ".",
     "paths": {
-      "@renderer/*": ["src/renderer/main-window/*"]
+      "@renderer/*": ["./src/renderer/main-window/*"]
     }
   },
   "include": [
