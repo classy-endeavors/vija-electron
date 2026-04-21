@@ -1,5 +1,10 @@
 /// <reference types="vite/client" />
 
+interface ImportMetaEnv {
+  readonly VITE_SUPABASE_URL?: string
+  readonly VITE_SUPABASE_ANON_KEY?: string
+}
+
 import type { BrowserBridgeHealthResponse } from '../shared/browserBridge'
 import type { NotifyPayload, NotificationRecord } from '../shared/notification'
 

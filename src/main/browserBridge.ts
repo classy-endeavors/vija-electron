@@ -1,6 +1,6 @@
 import { app, ipcMain } from 'electron'
 import { EventEmitter } from 'node:events'
-import { appendFile, mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import path from 'node:path'
 import { randomBytes, randomUUID } from 'node:crypto'
@@ -57,31 +57,93 @@ function resolveBridgePort(): number {
   return port
 }
 
+async function hydrateBridgeTokenFromDisk(): Promise<void> {
+  if (bridgeToken) {
+    return
+  }
+
+  const fromEnv = process.env['VIJIA_EXTENSION_TOKEN']?.trim()
+  if (fromEnv) {
+    bridgeToken = fromEnv
+    return
+  }
+
+  try {
+    const raw = await readFile(getBridgeConfigPath(), 'utf8')
+    const parsed = JSON.parse(raw) as { sessionToken?: unknown }
+    const t =
+      typeof parsed.sessionToken === 'string' ? parsed.sessionToken.trim() : ''
+    if (t.length >= 32 && /^[0-9a-f]+$/i.test(t)) {
+      bridgeToken = t
+    }
+  } catch {
+    // No config file yet, or invalid JSON — ensureBridgeToken will mint one.
+  }
+}
+
 function ensureBridgeToken(): string {
   if (!bridgeToken) {
-    bridgeToken =
-      process.env['VIJIA_EXTENSION_TOKEN']?.trim() ??
-      randomBytes(24).toString('hex')
+    bridgeToken = randomBytes(24).toString('hex')
   }
   return bridgeToken
 }
 
+/** Dev: files live under `<repo>/.vijia/` so the token is next to the project. Packaged: `userData`. */
+function getBridgeStorageRoot(): string {
+  const fromEnv = process.env['VIJIA_BRIDGE_REPO_DIR']?.trim()
+  if (fromEnv) {
+    return path.resolve(fromEnv)
+  }
+  if (!app.isPackaged) {
+    return path.join(process.cwd(), '.vijia')
+  }
+  return app.getPath('userData')
+}
+
 function getBridgeDataPath(): string {
   return path.join(
-    app.getPath('userData'),
+    getBridgeStorageRoot(),
     'data',
-    'browser-extension-captures.jsonl'
+    'browser-extension-captures.json'
   )
 }
 
+/** Serializes disk writes so concurrent captures do not trample the JSON file. */
+let captureWriteQueue: Promise<void> = Promise.resolve()
+
 function getBridgeConfigPath(): string {
-  return path.join(app.getPath('userData'), 'browser-extension-bridge.json')
+  return path.join(getBridgeStorageRoot(), 'browser-extension-bridge.json')
 }
 
 async function appendBrowserCapture(envelope: BrowserCaptureEnvelope): Promise<void> {
   const target = getBridgeDataPath()
   await mkdir(path.dirname(target), { recursive: true })
-  await appendFile(target, `${JSON.stringify(envelope)}\n`, 'utf8')
+
+  captureWriteQueue = captureWriteQueue
+    .then(async () => {
+      let list: BrowserCaptureEnvelope[] = []
+      try {
+        const raw = await readFile(target, 'utf8')
+        const parsed = JSON.parse(raw) as unknown
+        if (Array.isArray(parsed)) {
+          list = parsed as BrowserCaptureEnvelope[]
+        }
+      } catch (error) {
+        const code =
+          error && typeof error === 'object' && 'code' in error
+            ? (error as NodeJS.ErrnoException).code
+            : undefined
+        if (code !== 'ENOENT') {
+          console.warn('[Vijia] Could not read browser-extension-captures.json, starting fresh:', error)
+        }
+      }
+      list.push(envelope)
+      await writeFile(target, JSON.stringify(list, null, 2), 'utf8')
+    })
+    .catch((error) => {
+      console.error('[Vijia] Failed to persist browser capture:', error)
+    })
+  return captureWriteQueue
 }
 
 async function persistBridgeConfig(port: number): Promise<void> {
@@ -357,6 +419,7 @@ export async function startBrowserBridge(): Promise<void> {
     return
   }
 
+  await hydrateBridgeTokenFromDisk()
   ensureBridgeToken()
   registerBrowserBridgeIpc()
 
@@ -381,6 +444,10 @@ export async function startBrowserBridge(): Promise<void> {
     port
   }
   await persistBridgeConfig(port)
+  if (!app.isPackaged) {
+    console.info(`[Vijia] Extension bridge config: ${getBridgeConfigPath()}`)
+    console.info(`[Vijia] Captures JSON: ${getBridgeDataPath()}`)
+  }
 }
 
 export async function stopBrowserBridge(): Promise<void> {

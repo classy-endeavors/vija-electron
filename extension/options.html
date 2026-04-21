@@ -59,6 +59,13 @@
 
       <label for="sessionToken">Session Token</label>
       <input id="sessionToken" type="password" />
+      <p style="font-size: 14px; color: #374151; line-height: 1.5">
+        Required. With Vijia running, open <code>.vijia/browser-extension-bridge.json</code>
+        in your project folder (shown in the dev console as “Extension bridge config”),
+        copy the <code>sessionToken</code> value, paste it here, and Save. If the badge
+        shows <strong>SET</strong>, the token is missing; if <strong>OFF</strong>, URL or
+        token does not match the app.
+      </p>
 
       <button id="save" type="button">Save Settings</button>
       <div id="status"></div>

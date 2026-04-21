@@ -3,7 +3,7 @@
   "name": "Vijia Browser Bridge",
   "version": "0.1.0",
   "description": "Extracts AI chat context and forwards it to the local Vijia Electron app.",
-  "permissions": ["storage", "tabs"],
+  "permissions": ["contextMenus", "storage", "tabs"],
   "host_permissions": [
     "http://127.0.0.1/*",
     "https://chatgpt.com/*",

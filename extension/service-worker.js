@@ -1,3 +1,5 @@
+const RELOAD_MENU_ID = 'vijia-reload-extension'
+
 const DEFAULT_BRIDGE_URL = 'http://127.0.0.1:45731'
 const DEFAULT_SETTINGS = {
   bridgeUrl: DEFAULT_BRIDGE_URL,
@@ -17,28 +19,69 @@ async function setBadge(text, color) {
   await chrome.action.setBadgeBackgroundColor({ color })
 }
 
-async function postJson(url, body) {
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify(body)
-  })
+async function postJson(url, body, options = {}) {
+  const retries = options.retries ?? 2
+  const maxAttempts = retries + 1
 
-  let data = {}
-  try {
-    data = await response.json()
-  } catch (_error) {
-    data = {}
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body)
+      })
+
+      let data = {}
+      try {
+        data = await response.json()
+      } catch (_error) {
+        data = {}
+      }
+
+      const result = {
+        ok: response.ok,
+        status: response.status,
+        data
+      }
+
+      if (response.ok) {
+        return result
+      }
+
+      if (response.status < 500) {
+        return result
+      }
+    } catch (_error) {
+      if (attempt === maxAttempts - 1) {
+        return { ok: false, status: 0, data: {} }
+      }
+    }
+
+    await new Promise((resolve) => window.setTimeout(resolve, 300 * (attempt + 1)))
   }
 
-  return {
-    ok: response.ok,
-    status: response.status,
-    data
-  }
+  return { ok: false, status: 0, data: {} }
 }
+
+function registerReloadContextMenu() {
+  chrome.contextMenus.removeAll(() => {
+    chrome.contextMenus.create({
+      id: RELOAD_MENU_ID,
+      title: 'Reload extension',
+      contexts: ['action']
+    })
+  })
+}
+
+chrome.contextMenus.onClicked.addListener((info) => {
+  if (info.menuItemId === RELOAD_MENU_ID) {
+    chrome.runtime.reload()
+  }
+})
+
+registerReloadContextMenu()
 
 async function runHandshake() {
   const settings = await getSettings()
@@ -72,14 +115,22 @@ function buildCapturePayload(message, sender, sessionToken) {
   }
 }
 
-chrome.runtime.onInstalled.addListener(() => {
-  void chrome.storage.local.set(DEFAULT_SETTINGS)
-  void setBadge('SET', '#d97706')
+chrome.runtime.onInstalled.addListener((details) => {
+  registerReloadContextMenu()
+  if (details.reason === 'install') {
+    void chrome.storage.local.set(DEFAULT_SETTINGS)
+    void setBadge('SET', '#d97706')
+  }
+  // Fires on first install, unpacked reload (usually `update`), and extension updates.
+  void runHandshake()
 })
 
 chrome.runtime.onStartup.addListener(() => {
   void runHandshake()
 })
+
+// Service worker startup (including after `chrome.runtime.reload()` from the context menu).
+void runHandshake()
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type !== 'VIJIA_CAPTURE') {
@@ -100,6 +151,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       `${settings.bridgeUrl}/extension/capture`,
       payload
     )
+
+    if (!response.ok) {
+      console.warn(
+        '[Vijia] Capture POST failed:',
+        response.status,
+        settings.bridgeUrl
+      )
+    }
 
     await setBadge(response.ok ? 'ON' : 'OFF', response.ok ? '#15803d' : '#b91c1c')
     sendResponse(response)
