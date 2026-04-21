@@ -33,6 +33,12 @@ declare global {
       ) => () => void
       onGuideMode?: (callback: (payload: GuideModePayload) => void) => () => void
       dismiss?: (id: string) => void
+      /** Proactive (M3): report accept vs dismiss without relying on dismiss IPC alone. */
+      notifyNotificationOutcome?: (payload: {
+        notificationId: string
+        outcome: 'accepted' | 'dismissed'
+        actionId?: string
+      }) => void
       submitPrompt?: (text: string) => void
       /** Overlay: maps to `set-ignore-mouse` — when true, mouse events are ignored (pass-through). */
       setIgnoreMouse?: (ignore: boolean) => void

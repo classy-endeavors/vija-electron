@@ -83,6 +83,27 @@ chrome.contextMenus.onClicked.addListener((info) => {
 
 registerReloadContextMenu()
 
+const VIJIA_HOST_RE =
+  /^https:\/\/(chatgpt\.com|chat\.openai\.com|claude\.ai|gemini\.google\.com|www\.perplexity\.ai|chat\.deepseek\.com)\//u
+
+chrome.tabs.onActivated.addListener((activeInfo) => {
+  void (async () => {
+    try {
+      const tab = await chrome.tabs.get(activeInfo.tabId)
+      const url = tab.url || ''
+      if (!VIJIA_HOST_RE.test(url)) {
+        return
+      }
+      await chrome.tabs.sendMessage(activeInfo.tabId, {
+        type: 'VIJIA_SCHEDULE_CAPTURE',
+        reason: 'tab-switch'
+      })
+    } catch {
+      // Tab may not have content script yet.
+    }
+  })()
+})
+
 async function runHandshake() {
   const settings = await getSettings()
   if (!settings.sessionToken) {

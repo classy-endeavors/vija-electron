@@ -54,6 +54,13 @@ contextBridge.exposeInMainWorld('vijia', {
   dismiss: (id: string): void => {
     ipcRenderer.send(IPC_CHANNELS.VIJIA_DISMISS, { id })
   },
+  notifyNotificationOutcome: (payload: {
+    notificationId: string
+    outcome: 'accepted' | 'dismissed'
+    actionId?: string
+  }): void => {
+    ipcRenderer.send(IPC_CHANNELS.VIJIA_NOTIFICATION_OUTCOME, payload)
+  },
   submitPrompt: (text: string): void => {
     ipcRenderer.send(IPC_CHANNELS.VIJIA_PROMPT_SUBMIT, { text })
   },

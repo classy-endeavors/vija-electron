@@ -1,3 +1,5 @@
+import type { ProactiveSuggestionType } from './proactive'
+
 export type NotificationPriority = 'normal' | 'important' | 'system'
 
 export type NotificationAction = {
@@ -14,6 +16,11 @@ export type NotifyPayload = {
   codeSnippet?: string
   actions?: NotificationAction[]
   priority?: NotificationPriority
+  /** When set, dismiss/accept outcomes update `user-behavior.json` suggestion_stats (M3). */
+  proactiveTracking?: {
+    sessionNoteId: string
+    suggestionType: ProactiveSuggestionType
+  }
 }
 
 export type NotificationRecord = NotifyPayload & {

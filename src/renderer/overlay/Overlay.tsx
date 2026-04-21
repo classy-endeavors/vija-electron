@@ -45,6 +45,18 @@ export function Overlay(): ReactElement {
     setItems((prev) => prev.filter((p) => p.id !== id))
   }, [])
 
+  const onProactiveAccepted = useCallback(
+    (item: OverlayNotificationPayload, actionId: string) => {
+      window.vijia?.notifyNotificationOutcome?.({
+        notificationId: item.id,
+        outcome: 'accepted',
+        actionId
+      })
+      setItems((prev) => prev.filter((p) => p.id !== item.id))
+    },
+    []
+  )
+
   const onGuide = useCallback(() => {
     window.vijia?.setGuideMode?.(!guideMode)
   }, [guideMode])
@@ -112,6 +124,7 @@ export function Overlay(): ReactElement {
             stackFaded={stackFaded}
             onDismiss={onDismiss}
             onGuide={onGuide}
+            onProactiveAccepted={onProactiveAccepted}
           />
         ) : null}
         <PromptBox open={isOpen} onClose={closeOverlay} rootRef={promptRef} />

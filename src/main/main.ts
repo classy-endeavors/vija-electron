@@ -6,16 +6,19 @@ import {
   registerOverlayInputIpc
 } from './overlayManager'
 import { registerNotificationIpc } from './NotificationManager'
+import { startProactiveEngine, stopProactiveEngine } from './proactive-engine'
 
 void app.whenReady().then(() => {
   registerNotificationIpc()
   registerOverlayInputIpc()
   void startBrowserBridge()
+  startProactiveEngine()
   getOrCreateOverlayWindow()
   createTray()
 })
 
 app.on('before-quit', () => {
+  stopProactiveEngine()
   void stopBrowserBridge()
 })
 

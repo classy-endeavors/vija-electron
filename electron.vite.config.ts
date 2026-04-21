@@ -2,6 +2,7 @@ import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'node:path'
 import type { Plugin } from 'vite'
+import { loadEnv } from 'vite'
 
 /** Vite adds `crossorigin` to built assets; with `loadFile()` (file://) that often blocks ES module loads in Electron → blank window. */
 function electronRendererStripCrossorigin(): Plugin {
@@ -17,8 +18,17 @@ function electronRendererStripCrossorigin(): Plugin {
   }
 }
 
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '')
+  const viteUrl = env['VITE_SUPABASE_URL'] ?? ''
+  const viteKey = env['VITE_SUPABASE_ANON_KEY'] ?? ''
+
+  return {
   main: {
+    define: {
+      'process.env.VITE_SUPABASE_URL': JSON.stringify(viteUrl),
+      'process.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(viteKey)
+    },
     plugins: [externalizeDepsPlugin()]
   },
   preload: {
@@ -52,5 +62,6 @@ export default defineConfig({
         '@renderer': resolve('src/renderer/main-window')
       }
     }
+  }
   }
 })

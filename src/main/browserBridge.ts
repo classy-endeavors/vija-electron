@@ -4,6 +4,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import path from 'node:path'
 import { randomBytes, randomUUID } from 'node:crypto'
+import { appendSessionLogNote } from './session-log'
+import { getVijiaStorageRoot } from './vijiaStorage'
 import { IPC_CHANNELS } from '../shared/ipcChannels'
 import type {
   BrowserBridgeHandshakeRequest,
@@ -88,16 +90,8 @@ function ensureBridgeToken(): string {
   return bridgeToken
 }
 
-/** Dev: files live under `<repo>/.vijia/` so the token is next to the project. Packaged: `userData`. */
 function getBridgeStorageRoot(): string {
-  const fromEnv = process.env['VIJIA_BRIDGE_REPO_DIR']?.trim()
-  if (fromEnv) {
-    return path.resolve(fromEnv)
-  }
-  if (!app.isPackaged) {
-    return path.join(process.cwd(), '.vijia')
-  }
-  return app.getPath('userData')
+  return getVijiaStorageRoot()
 }
 
 function getBridgeDataPath(): string {
@@ -356,6 +350,18 @@ async function handleCapture(
   }
 
   await appendBrowserCapture(envelope)
+  void appendSessionLogNote({
+    source: 'browser-extension',
+    site: body.site,
+    title: body.title,
+    url: body.url,
+    user: extract.user,
+    assistant: extract.assistant,
+    dedupeKey,
+    bridgeCaptureId: envelope.id
+  }).catch((error) => {
+    console.error('[Vijia] session-log append failed:', error)
+  })
   bridgeStatus = {
     ...bridgeStatus,
     connected: true,

@@ -9,6 +9,10 @@ import type {
 import { IPC_CHANNELS } from '../shared/ipcChannels'
 import { getOverlayWebContents, refreshOverlayWindow } from './overlayManager'
 import { getMainWindow } from './windowManager'
+import {
+  recordProactiveNotificationShown,
+  recordProactiveOutcome
+} from './user-behavior'
 
 /**
  * Main-process notification engine: priorities, cooldown, adaptive multiplier,
@@ -68,6 +72,14 @@ export class NotificationManager {
       this.lastNormalShownAt = record.createdAt
     }
 
+    if (payload.proactiveTracking) {
+      void recordProactiveNotificationShown({
+        notificationId: record.id,
+        sessionNoteId: payload.proactiveTracking.sessionNoteId,
+        suggestionType: payload.proactiveTracking.suggestionType
+      })
+    }
+
     this.pushToOverlay(record)
   }
 
@@ -82,8 +94,13 @@ export class NotificationManager {
       codeSnippet: payload.codeSnippet,
       actions: payload.actions,
       priority,
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      proactiveTracking: payload.proactiveTracking
     }
+  }
+
+  private findRecordById(id: string): NotificationRecord | undefined {
+    return this.history.find((r) => r.id === id)
   }
 
   private pushHistory(record: NotificationRecord): void {
@@ -153,12 +170,48 @@ export class NotificationManager {
 
   private handleDismiss(payload: unknown): void {
     const { id } = payload as { id: string }
+    const record = this.findRecordById(id)
+    if (record?.proactiveTracking) {
+      void recordProactiveOutcome({
+        notificationId: id,
+        sessionNoteId: record.proactiveTracking.sessionNoteId,
+        outcome: 'dismissed',
+        suggestionType: record.proactiveTracking.suggestionType
+      })
+    }
+
     this.recordDismissal(id)
     this.consecutiveDismissals += 1
     if (this.consecutiveDismissals >= NotificationManager.DISMISSALS_TO_DOUBLE) {
       this.cooldownMultiplier = 2
       this.consecutiveDismissals = 0
     }
+  }
+
+  private handleNotificationOutcome(payload: unknown): void {
+    const p = payload as {
+      notificationId?: string
+      outcome?: 'accepted' | 'dismissed'
+      actionId?: string
+    }
+    const notificationId =
+      typeof p.notificationId === 'string' ? p.notificationId : ''
+    const outcome = p.outcome
+    if (!notificationId || (outcome !== 'accepted' && outcome !== 'dismissed')) {
+      return
+    }
+
+    const record = this.findRecordById(notificationId)
+    if (!record?.proactiveTracking) {
+      return
+    }
+
+    void recordProactiveOutcome({
+      notificationId,
+      sessionNoteId: record.proactiveTracking.sessionNoteId,
+      outcome: outcome === 'dismissed' ? 'dismissed' : 'accepted',
+      suggestionType: record.proactiveTracking.suggestionType
+    })
   }
 
   private handlePromptSubmit(_payload: unknown): void {
@@ -211,6 +264,14 @@ export class NotificationManager {
         return
       }
       this.handleDismiss(payload)
+    })
+
+    ipcMain.on(IPC_CHANNELS.VIJIA_NOTIFICATION_OUTCOME, (event, payload) => {
+      const ow = getOverlayWebContents()
+      if (!ow || ow.isDestroyed() || event.sender !== ow) {
+        return
+      }
+      this.handleNotificationOutcome(payload)
     })
 
     ipcMain.on(IPC_CHANNELS.VIJIA_PROMPT_SUBMIT, (event, payload) => {

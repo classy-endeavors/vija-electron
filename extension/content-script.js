@@ -1,8 +1,12 @@
-const VIJIA_CAPTURE_DEBOUNCE_MS = 1200
+/** M3: 10s global debounce across all capture reasons. */
+const VIJIA_CAPTURE_DEBOUNCE_MS = 10_000
 const VIJIA_STABILITY_DELAY_MS = 1000
 const VIJIA_STABILITY_ATTEMPTS = 5
 /** Extra one-shot delays after load so we capture when the chat mounts late (SPA). */
 const VIJIA_STARTUP_RETRY_DELAYS_MS = [2500, 6000, 12000]
+const VIJIA_TYPING_STOP_IDLE_MS = 800
+const VIJIA_SCROLL_END_MS = 400
+const VIJIA_DOM_IDLE_MS = 1500
 
 let captureTimer = null
 let lastSentHash = ''
@@ -10,6 +14,10 @@ let lastSentHash = ''
 let emitChain = Promise.resolve()
 let emptyPairRetries = 0
 const VIJIA_EMPTY_PAIR_RETRY_MAX = 4
+
+let typingStopTimer = null
+let scrollStopTimer = null
+let domIdleTimer = null
 
 function buildHash(input) {
   let hash = 0
@@ -38,7 +46,6 @@ async function waitForStableExtract(adapter) {
       return current
     }
 
-    // Do not overwrite a good snapshot with null (transient DOM / layout flicker).
     if (current) {
       previous = current
     }
@@ -60,8 +67,6 @@ async function emitCapture(reason) {
     return
   }
 
-  // Avoid posting while the tab is hidden so we do not send stale partial streams;
-  // when the user returns, visibility listener schedules capture.
   if (document.visibilityState === 'hidden') {
     return
   }
@@ -106,11 +111,6 @@ async function emitCapture(reason) {
   })
 }
 
-/**
- * After reload/update, the page's content script is disconnected; `sendMessage` may
- * reject a Promise even when a callback is used — catch both paths to avoid
- * "Extension context invalidated" uncaught rejections.
- */
 function sendCaptureToExtension(payload) {
   if (!chrome.runtime?.id) {
     return
@@ -129,11 +129,13 @@ function sendCaptureToExtension(payload) {
     if (maybePromise != null && typeof maybePromise.then === 'function') {
       maybePromise.catch(() => {})
     }
-  } catch (_error) {
-    // Sync throw when context is invalid (less common).
-  }
+  } catch (_error) {}
 }
 
+/**
+ * Global 10s debounce for every milestone reason.
+ * @param {string} reason app-switch | tab-switch | typing-stop | scroll-pause | typing-start
+ */
 function scheduleCapture(reason) {
   if (captureTimer !== null) {
     window.clearTimeout(captureTimer)
@@ -145,29 +147,80 @@ function scheduleCapture(reason) {
   }, VIJIA_CAPTURE_DEBOUNCE_MS)
 }
 
+if (chrome.runtime?.id) {
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === 'VIJIA_SCHEDULE_CAPTURE' && typeof message.reason === 'string') {
+      scheduleCapture(message.reason)
+      sendResponse({ ok: true })
+      return true
+    }
+    return false
+  })
+}
+
 function installObservers() {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      scheduleCapture('app-switch')
+    } else if (document.visibilityState === 'visible') {
+      scheduleCapture('tab-switch')
+    }
+  })
+
+  window.addEventListener(
+    'scroll',
+    () => {
+      if (scrollStopTimer !== null) {
+        window.clearTimeout(scrollStopTimer)
+      }
+      scrollStopTimer = window.setTimeout(() => {
+        scrollStopTimer = null
+        scheduleCapture('scroll-pause')
+      }, VIJIA_SCROLL_END_MS)
+    },
+    true
+  )
+
+  window.addEventListener(
+    'keydown',
+    () => {
+      scheduleCapture('typing-start')
+    },
+    true
+  )
+
+  window.addEventListener(
+    'keyup',
+    () => {
+      if (typingStopTimer !== null) {
+        window.clearTimeout(typingStopTimer)
+      }
+      typingStopTimer = window.setTimeout(() => {
+        typingStopTimer = null
+        scheduleCapture('typing-stop')
+      }, VIJIA_TYPING_STOP_IDLE_MS)
+    },
+    true
+  )
+
   const observer = new MutationObserver(() => {
-    scheduleCapture('mutation')
+    if (domIdleTimer !== null) {
+      window.clearTimeout(domIdleTimer)
+    }
+    domIdleTimer = window.setTimeout(() => {
+      domIdleTimer = null
+      scheduleCapture('typing-stop')
+    }, VIJIA_DOM_IDLE_MS)
   })
 
   observer.observe(document.documentElement, {
     childList: true,
     subtree: true
   })
-
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') {
-      scheduleCapture('visibility')
-    }
-  })
-
-  window.addEventListener('focus', () => {
-    scheduleCapture('focus')
-  })
 }
 
 installObservers()
-scheduleCapture('startup')
+scheduleCapture('typing-stop')
 for (const delay of VIJIA_STARTUP_RETRY_DELAYS_MS) {
   window.setTimeout(() => enqueueEmitCapture(`startup-delay-${delay}`), delay)
 }

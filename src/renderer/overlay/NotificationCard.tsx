@@ -17,6 +17,7 @@ type Props = {
   guideMode: boolean
   onDismiss: () => void
   onGuide: () => void
+  onProactiveAccepted: (item: OverlayNotificationPayload, actionId: string) => void
 }
 
 export function NotificationCard({
@@ -24,7 +25,8 @@ export function NotificationCard({
   isNewest,
   guideMode,
   onDismiss,
-  onGuide
+  onGuide,
+  onProactiveAccepted
 }: Props): ReactElement {
   const actions = item.actions?.length ? item.actions : DEFAULT_ACTIONS
   const bodyText = isNewest ? item.message : firstLine(item.message)
@@ -58,8 +60,19 @@ export function NotificationCard({
                 </button>
               )
             }
-            const isGuideAction =
-              a.kind === 'guide' || a.id === 'guide'
+            if (item.proactiveTracking) {
+              return (
+                <button
+                  key={a.id}
+                  type="button"
+                  className="btn-guide"
+                  onClick={() => onProactiveAccepted(item, a.id)}
+                >
+                  {a.label}
+                </button>
+              )
+            }
+            const isGuideAction = a.kind === 'guide' || a.id === 'guide'
             const guideLabel =
               isGuideAction && guideMode ? 'Stop guiding' : a.label
             return (

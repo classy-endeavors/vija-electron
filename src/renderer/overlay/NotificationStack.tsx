@@ -9,6 +9,7 @@ type Props = {
   stackFaded: boolean
   onDismiss: (id: string) => void
   onGuide: () => void
+  onProactiveAccepted: (item: OverlayNotificationPayload, actionId: string) => void
 }
 
 export function NotificationStack({
@@ -17,7 +18,8 @@ export function NotificationStack({
   guideMode,
   stackFaded,
   onDismiss,
-  onGuide
+  onGuide,
+  onProactiveAccepted
 }: Props): ReactElement {
   return (
     <div
@@ -35,6 +37,7 @@ export function NotificationStack({
             guideMode={guideMode}
             onDismiss={() => onDismiss(item.id)}
             onGuide={onGuide}
+            onProactiveAccepted={onProactiveAccepted}
           />
         )
       })}
