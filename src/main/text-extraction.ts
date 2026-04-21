@@ -4,8 +4,17 @@
  * For DOM reads, inject `getInnerText` (e.g. `() => webContents.executeJavaScript('document.body.innerText')`).
  */
 
+import { createHash } from 'node:crypto'
+import type {
+  BrowserExtensionCaptureExtract,
+  BrowserExtensionCaptureRequest
+} from '../shared/browserBridge'
+
 const STREAM_POLL_MS = 1000
 const STREAM_TIMEOUT_MS = 20_000
+
+const USER_LIMIT = 4 * 1024
+const ASSISTANT_LIMIT = 12 * 1024
 
 /** `site` field in session-log notes when source is ai-chat */
 export type AiChatSiteId =
@@ -246,4 +255,44 @@ function trySplitByRoleMarkers(
   }
 
   return null
+}
+
+function truncateMiddle(input: string, limit: number): string {
+  if (input.length <= limit) {
+    return input
+  }
+
+  const marker = '\n[truncated]\n'
+  const remaining = Math.max(limit - marker.length, 0)
+  const head = Math.ceil(remaining / 2)
+  const tail = Math.floor(remaining / 2)
+  return `${input.slice(0, head)}${marker}${input.slice(input.length - tail)}`
+}
+
+export function normalizeBrowserExtract(
+  extract: BrowserExtensionCaptureExtract
+): BrowserExtensionCaptureExtract {
+  return {
+    user: truncateMiddle(scrubSecrets(extract.user.trim()), USER_LIMIT),
+    assistant: truncateMiddle(
+      scrubSecrets(extract.assistant.trim()),
+      ASSISTANT_LIMIT
+    )
+  }
+}
+
+export function buildBrowserCaptureDedupeKey(
+  payload: BrowserExtensionCaptureRequest
+): string {
+  const normalized = normalizeBrowserExtract(payload.extract)
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        site: payload.site,
+        title: payload.title,
+        user: normalized.user,
+        assistant: normalized.assistant
+      })
+    )
+    .digest('hex')
 }

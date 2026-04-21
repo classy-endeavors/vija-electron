@@ -1,5 +1,6 @@
 /// <reference types="vite/client" />
 
+import type { BrowserBridgeHealthResponse } from '../shared/browserBridge'
 import type { NotifyPayload, NotificationRecord } from '../shared/notification'
 
 type VijiaTabKey = 'home' | 'context' | 'subscription' | 'settings'
@@ -20,6 +21,7 @@ declare global {
       ) => () => void
       notify?: (payload: NotifyPayload) => void
       getHistory?: () => Promise<NotificationRecord[]>
+      getBrowserBridgeStatus?: () => Promise<BrowserBridgeHealthResponse>
       setGuideMode?: (active: boolean) => void
       onNotification?: (
         callback: (payload: OverlayNotificationPayload) => void

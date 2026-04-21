@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC_CHANNELS } from '../shared/ipcChannels'
+import type { BrowserBridgeHealthResponse } from '../shared/browserBridge'
 import type { TabKey } from '../shared/tab'
 import type { NotificationRecord, NotifyPayload } from '../shared/notification'
 
@@ -38,6 +39,9 @@ contextBridge.exposeInMainWorld('vijia', {
   },
   getHistory: (): Promise<NotificationRecord[]> => {
     return ipcRenderer.invoke(IPC_CHANNELS.VIJIA_GET_HISTORY)
+  },
+  getBrowserBridgeStatus: (): Promise<BrowserBridgeHealthResponse> => {
+    return ipcRenderer.invoke(IPC_CHANNELS.VIJIA_GET_BROWSER_BRIDGE_STATUS)
   },
   setGuideMode: (active: boolean): void => {
     ipcRenderer.send(IPC_CHANNELS.VIJIA_SET_GUIDE_MODE, { active })

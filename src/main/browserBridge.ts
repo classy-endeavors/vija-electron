@@ -1,0 +1,410 @@
+import { app, ipcMain } from 'electron'
+import { EventEmitter } from 'node:events'
+import { appendFile, mkdir, writeFile } from 'node:fs/promises'
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import path from 'node:path'
+import { randomBytes, randomUUID } from 'node:crypto'
+import { IPC_CHANNELS } from '../shared/ipcChannels'
+import type {
+  BrowserBridgeHandshakeRequest,
+  BrowserBridgeHandshakeResponse,
+  BrowserBridgeHealthResponse,
+  BrowserBridgeStatus,
+  BrowserCaptureEnvelope,
+  BrowserExtensionCaptureRequest,
+  BrowserSite
+} from '../shared/browserBridge'
+import {
+  buildBrowserCaptureDedupeKey,
+  normalizeBrowserExtract
+} from './text-extraction'
+
+const DEFAULT_BRIDGE_PORT = 45731
+const MAX_REQUEST_BYTES = 256 * 1024
+const EVENT_TTL_MS = 30_000
+const PAYLOAD_TTL_MS = 10_000
+
+const allowedSites = new Set<BrowserSite>([
+  'chatgpt',
+  'claude',
+  'gemini',
+  'perplexity',
+  'deepseek'
+])
+
+const browserBridgeEvents = new EventEmitter()
+
+let bridgeServer: ReturnType<typeof createServer> | null = null
+let bridgeIpcRegistered = false
+let bridgeToken = ''
+let bridgeStatus: BrowserBridgeStatus = {
+  running: false,
+  port: null,
+  requiresToken: true,
+  connected: false,
+  lastHandshakeAt: null,
+  lastCaptureAt: null
+}
+const seenEventIds = new Map<string, number>()
+const seenPayloads = new Map<string, number>()
+
+function resolveBridgePort(): number {
+  const raw = process.env['VIJIA_EXTENSION_BRIDGE_PORT']
+  const port = raw ? Number(raw) : DEFAULT_BRIDGE_PORT
+  if (!Number.isInteger(port) || port <= 0) {
+    return DEFAULT_BRIDGE_PORT
+  }
+  return port
+}
+
+function ensureBridgeToken(): string {
+  if (!bridgeToken) {
+    bridgeToken =
+      process.env['VIJIA_EXTENSION_TOKEN']?.trim() ??
+      randomBytes(24).toString('hex')
+  }
+  return bridgeToken
+}
+
+function getBridgeDataPath(): string {
+  return path.join(
+    app.getPath('userData'),
+    'data',
+    'browser-extension-captures.jsonl'
+  )
+}
+
+function getBridgeConfigPath(): string {
+  return path.join(app.getPath('userData'), 'browser-extension-bridge.json')
+}
+
+async function appendBrowserCapture(envelope: BrowserCaptureEnvelope): Promise<void> {
+  const target = getBridgeDataPath()
+  await mkdir(path.dirname(target), { recursive: true })
+  await appendFile(target, `${JSON.stringify(envelope)}\n`, 'utf8')
+}
+
+async function persistBridgeConfig(port: number): Promise<void> {
+  const target = getBridgeConfigPath()
+  await mkdir(path.dirname(target), { recursive: true })
+  await writeFile(
+    target,
+    JSON.stringify(
+      {
+        bridgeUrl: `http://127.0.0.1:${port}`,
+        sessionToken: ensureBridgeToken(),
+        updatedAt: new Date().toISOString()
+      },
+      null,
+      2
+    ),
+    'utf8'
+  )
+}
+
+function writeJson(
+  res: ServerResponse,
+  statusCode: number,
+  body: Record<string, unknown>
+): void {
+  res.statusCode = statusCode
+  res.setHeader('Content-Type', 'application/json; charset=utf-8')
+  res.end(JSON.stringify(body))
+}
+
+function cleanupExpired(map: Map<string, number>, ttlMs: number): void {
+  const cutoff = Date.now() - ttlMs
+  for (const [key, ts] of map.entries()) {
+    if (ts < cutoff) {
+      map.delete(key)
+    }
+  }
+}
+
+async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = []
+  let bytes = 0
+
+  for await (const chunk of req) {
+    const bufferChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+    bytes += bufferChunk.length
+    if (bytes > MAX_REQUEST_BYTES) {
+      throw new Error('payload-too-large')
+    }
+    chunks.push(bufferChunk)
+  }
+
+  const text = Buffer.concat(chunks).toString('utf8')
+  if (!text) {
+    return {}
+  }
+
+  return JSON.parse(text) as unknown
+}
+
+function isCaptureRequest(value: unknown): value is BrowserExtensionCaptureRequest {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+
+  const payload = value as Partial<BrowserExtensionCaptureRequest>
+  return (
+    payload.schema === 1 &&
+    payload.source === 'browser-extension' &&
+    typeof payload.sessionToken === 'string' &&
+    typeof payload.eventId === 'string' &&
+    typeof payload.capturedAt === 'string' &&
+    typeof payload.site === 'string' &&
+    typeof payload.url === 'string' &&
+    typeof payload.title === 'string' &&
+    typeof payload.tabId === 'number' &&
+    typeof payload.frameId === 'number' &&
+    !!payload.extract &&
+    typeof payload.extract.user === 'string' &&
+    typeof payload.extract.assistant === 'string'
+  )
+}
+
+function isHandshakeRequest(value: unknown): value is BrowserBridgeHandshakeRequest {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+
+  const payload = value as Partial<BrowserBridgeHandshakeRequest>
+  return typeof payload.token === 'string'
+}
+
+function getHealthResponse(): BrowserBridgeHealthResponse {
+  return {
+    ok: bridgeStatus.running,
+    ...bridgeStatus
+  }
+}
+
+function hasValidToken(payloadToken: string | undefined): boolean {
+  return typeof payloadToken === 'string' && payloadToken === ensureBridgeToken()
+}
+
+async function handleHandshake(
+  req: IncomingMessage,
+  res: ServerResponse
+): Promise<void> {
+  let body: unknown
+
+  try {
+    body = await readJsonBody(req)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'invalid-body'
+    writeJson(res, message === 'payload-too-large' ? 413 : 400, {
+      ok: false,
+      error: message
+    })
+    return
+  }
+
+  if (!isHandshakeRequest(body) || !hasValidToken(body.token)) {
+    writeJson(res, 401, {
+      ok: false,
+      connected: false,
+      error: 'invalid-token'
+    })
+    return
+  }
+
+  bridgeStatus = {
+    ...bridgeStatus,
+    connected: true,
+    lastHandshakeAt: Date.now()
+  }
+
+  const response: BrowserBridgeHandshakeResponse = {
+    ok: true,
+    connected: true
+  }
+  writeJson(res, 200, response)
+}
+
+async function handleCapture(
+  req: IncomingMessage,
+  res: ServerResponse
+): Promise<void> {
+  let body: unknown
+
+  try {
+    body = await readJsonBody(req)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'invalid-body'
+    writeJson(res, message === 'payload-too-large' ? 413 : 400, {
+      accepted: false,
+      error: message
+    })
+    return
+  }
+
+  if (!isCaptureRequest(body)) {
+    writeJson(res, 400, { accepted: false, error: 'invalid-schema' })
+    return
+  }
+
+  if (!hasValidToken(body.sessionToken)) {
+    writeJson(res, 401, { accepted: false, error: 'invalid-token' })
+    return
+  }
+
+  if (!allowedSites.has(body.site)) {
+    writeJson(res, 400, { accepted: false, error: 'invalid-site' })
+    return
+  }
+
+  const extract = normalizeBrowserExtract(body.extract)
+  if (!extract.user && !extract.assistant) {
+    writeJson(res, 422, { accepted: false, error: 'empty-extract' })
+    return
+  }
+
+  cleanupExpired(seenEventIds, EVENT_TTL_MS)
+  cleanupExpired(seenPayloads, PAYLOAD_TTL_MS)
+
+  if (seenEventIds.has(body.eventId)) {
+    writeJson(res, 202, { accepted: false, deduped: true })
+    return
+  }
+
+  const dedupeKey = buildBrowserCaptureDedupeKey({
+    ...body,
+    extract
+  })
+
+  if (seenPayloads.has(dedupeKey)) {
+    writeJson(res, 202, { accepted: false, deduped: true })
+    return
+  }
+
+  seenEventIds.set(body.eventId, Date.now())
+  seenPayloads.set(dedupeKey, Date.now())
+
+  const envelope: BrowserCaptureEnvelope = {
+    id: randomUUID(),
+    receivedAt: new Date().toISOString(),
+    dedupeKey,
+    payload: {
+      ...body,
+      extract
+    }
+  }
+
+  await appendBrowserCapture(envelope)
+  bridgeStatus = {
+    ...bridgeStatus,
+    connected: true,
+    lastCaptureAt: Date.now()
+  }
+  browserBridgeEvents.emit('capture', envelope)
+  writeJson(res, 202, { accepted: true, id: envelope.id })
+}
+
+async function handleBridgeRequest(
+  req: IncomingMessage,
+  res: ServerResponse
+): Promise<void> {
+  const method = req.method ?? 'GET'
+  const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+
+  if (method === 'GET' && url.pathname === '/extension/health') {
+    writeJson(res, 200, getHealthResponse())
+    return
+  }
+
+  if (method === 'POST' && url.pathname === '/extension/handshake') {
+    await handleHandshake(req, res)
+    return
+  }
+
+  if (method === 'POST' && url.pathname === '/extension/capture') {
+    await handleCapture(req, res)
+    return
+  }
+
+  writeJson(res, 404, { ok: false, error: 'not-found' })
+}
+
+function registerBrowserBridgeIpc(): void {
+  if (bridgeIpcRegistered) {
+    return
+  }
+
+  bridgeIpcRegistered = true
+  ipcMain.handle(IPC_CHANNELS.VIJIA_GET_BROWSER_BRIDGE_STATUS, () => {
+    return getHealthResponse()
+  })
+}
+
+export function onBrowserCapture(
+  listener: (payload: BrowserCaptureEnvelope) => void
+): () => void {
+  browserBridgeEvents.on('capture', listener)
+  return () => {
+    browserBridgeEvents.off('capture', listener)
+  }
+}
+
+export function getBrowserBridgeStatus(): BrowserBridgeStatus {
+  return { ...bridgeStatus }
+}
+
+export async function startBrowserBridge(): Promise<void> {
+  if (bridgeServer) {
+    return
+  }
+
+  ensureBridgeToken()
+  registerBrowserBridgeIpc()
+
+  const port = resolveBridgePort()
+  bridgeServer = createServer((req, res) => {
+    void handleBridgeRequest(req, res).catch((error) => {
+      console.error('[Vijia] Browser bridge error:', error)
+      writeJson(res, 500, { ok: false, error: 'internal-error' })
+    })
+  })
+
+  await new Promise<void>((resolve, reject) => {
+    bridgeServer?.once('error', reject)
+    bridgeServer?.listen(port, '127.0.0.1', () => {
+      resolve()
+    })
+  })
+
+  bridgeStatus = {
+    ...bridgeStatus,
+    running: true,
+    port
+  }
+  await persistBridgeConfig(port)
+}
+
+export async function stopBrowserBridge(): Promise<void> {
+  if (!bridgeServer) {
+    return
+  }
+
+  const server = bridgeServer
+  bridgeServer = null
+
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error)
+        return
+      }
+      resolve()
+    })
+  })
+
+  bridgeStatus = {
+    ...bridgeStatus,
+    running: false,
+    connected: false,
+    port: null
+  }
+}
