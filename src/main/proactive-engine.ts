@@ -21,6 +21,17 @@ import api, { type ClaudeProxyRequest } from "../shared/Api";
 
 const PROACTIVE_CLAUDE_MAX_TOKENS = 1024;
 
+/**
+ * When true, the proactive call uses `buildProactiveUserMessageTest` instead of
+ * the production prompt. The test prompt instructs the model to always return
+ * a valid JSON response with `should_speak: true` so you can verify the proxy
+ * and notification path end-to-end. Set to false to use the real prompt.
+ */
+const USE_TEST_PROACTIVE_PROMPT = true;
+
+/** Set to false before release: when true, `should_speak: false` still shows a notification. */
+const DEBUG_FORCE_PROACTIVE_ALWAYS_SPEAK = true;
+
 function formatSessionNoteForPrompt(note: SessionLogNote): string {
   const title = (note.title ?? "").trim() || "Untitled";
   const head = `[${note.site}] ${title}`;
@@ -110,6 +121,44 @@ function buildProactiveUserMessage(
     summarizeUserBehaviorForPrompt(behavior),
     "",
     "Reply now with the JSON object only.",
+  ].join("\n");
+}
+
+/**
+ * Test-only user message: asks Claude to always reply with a single JSON object
+ * matching the proactive contract and `should_speak: true`. Does not replace
+ * the production prompt in `buildProactiveUserMessage`.
+ */
+function buildProactiveUserMessageTest(
+  latestNote: SessionLogNote,
+  sessionNotes: SessionLogNote[],
+  behavior: UserBehaviorFile,
+): string {
+  return [
+    "TEST MODE — Vijia proactive pipeline check.",
+    "",
+    "Ignore normal silence rules. Every time, reply with exactly one JSON object",
+    "and nothing else (no markdown fences, no commentary). The object MUST be:",
+    "",
+    "  {",
+    '    "should_speak": true,',
+    '    "message": "Test: proactive notification (pipeline OK)",',
+    '    "type": "guide_offer"',
+    "  }",
+    "",
+    "Optional: you may add at most one button: ",
+    '"buttons": [ { "id": "ok", "label": "OK" } ]',
+    "",
+    "Context (for your reference only; still output the JSON above):",
+    "",
+    "Triggering note:",
+    formatSessionNoteForPrompt(latestNote),
+    "",
+    "Recent session notes (oldest to newest):",
+    ...sessionNotes.map((n) => formatSessionNoteForPrompt(n)),
+    "",
+    "User / Vijia behavior summary:",
+    summarizeUserBehaviorForPrompt(behavior),
   ].join("\n");
 }
 
@@ -303,13 +352,17 @@ async function callClaudeProactive(
   const notes = await readLastSessionNotes(10);
   const behavior = await readUserBehavior();
 
+  const userContent = USE_TEST_PROACTIVE_PROMPT
+    ? buildProactiveUserMessageTest(latestNote, notes, behavior)
+    : buildProactiveUserMessage(latestNote, notes, behavior);
+
   const body: ClaudeProxyRequest = {
     proactive: true,
     max_tokens: PROACTIVE_CLAUDE_MAX_TOKENS,
     messages: [
       {
         role: "user",
-        content: buildProactiveUserMessage(latestNote, notes, behavior),
+        content: userContent,
       },
     ],
   };
@@ -342,6 +395,22 @@ async function callClaudeProactive(
   }
 }
 
+function applyDebugForceProactiveSpeak(
+  parsed: ProactiveClaudeResponse | null,
+): ProactiveClaudeResponse | null {
+  if (!DEBUG_FORCE_PROACTIVE_ALWAYS_SPEAK || !parsed) {
+    return parsed;
+  }
+  if (parsed.should_speak) {
+    return parsed;
+  }
+  return {
+    should_speak: true,
+    message: "[Debug] Forced speak — model returned should_speak: false",
+    type: "guide_offer",
+  };
+}
+
 function mapButtons(
   buttons: ProactiveClaudeButton[] | undefined,
 ): NotificationAction[] {
@@ -370,19 +439,20 @@ async function handleNote(note: SessionLogNote): Promise<void> {
     }
 
     const parsed = await callClaudeProactive(note);
-    if (!parsed || parsed.should_speak === false) {
+    const effective = applyDebugForceProactiveSpeak(parsed);
+    if (!effective || effective.should_speak === false) {
       return;
     }
 
-    const actions = mapButtons(parsed.buttons);
+    const actions = mapButtons(effective.buttons);
     notificationManager.notify({
-      message: parsed.message,
-      contextSource: `Proactive — ${parsed.type}`,
+      message: effective.message,
+      contextSource: `Proactive — ${effective.type}`,
       actions,
       priority: "normal",
       proactiveTracking: {
         sessionNoteId: note.id,
-        suggestionType: parsed.type,
+        suggestionType: effective.type,
       },
     });
   } finally {

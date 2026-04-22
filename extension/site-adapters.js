@@ -215,7 +215,10 @@ const VIJIA_SITE_ADAPTERS = (() => {
     {
       site: 'perplexity',
       matches() {
-        return location.hostname === 'www.perplexity.ai'
+        return (
+          location.hostname === 'www.perplexity.ai' ||
+          location.hostname === 'perplexity.ai'
+        )
       },
       extractLastPair() {
         return stableExtract(['You'], ['Perplexity'])

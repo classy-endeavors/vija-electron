@@ -27,6 +27,7 @@ export function Overlay(): ReactElement {
     const offNotify = api.onNotification((payload) => {
       setItems((prev) => [...prev, payload].slice(-MAX_HISTORY_NOTIFICATIONS))
       setStackFaded(false)
+      setIsOpen(true)
     })
     const offGuide = api.onGuideMode(({ active }) => {
       setGuideMode(active)

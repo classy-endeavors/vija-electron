@@ -8,10 +8,31 @@ const DEFAULT_SETTINGS = {
 
 async function getSettings() {
   const result = await chrome.storage.local.get(DEFAULT_SETTINGS)
-  return {
-    bridgeUrl: result.bridgeUrl || DEFAULT_BRIDGE_URL,
-    sessionToken: result.sessionToken || ''
+  let bridgeUrl = result.bridgeUrl || DEFAULT_BRIDGE_URL
+  let sessionToken = result.sessionToken || ''
+  if (!sessionToken) {
+    try {
+      const base = bridgeUrl.replace(/\/$/, '')
+      const response = await fetch(`${base}/extension/bootstrap`)
+      if (response.ok) {
+        const data = await response.json()
+        const t =
+          data && typeof data.sessionToken === 'string'
+            ? data.sessionToken.trim()
+            : ''
+        if (t) {
+          sessionToken = t
+          if (data && typeof data.bridgeUrl === 'string' && data.bridgeUrl.trim()) {
+            bridgeUrl = data.bridgeUrl.trim()
+          }
+          await chrome.storage.local.set({ bridgeUrl, sessionToken })
+        }
+      }
+    } catch {
+      // App not running or port mismatch — user can paste token in options.
+    }
   }
+  return { bridgeUrl, sessionToken }
 }
 
 async function setBadge(text, color) {
@@ -59,7 +80,7 @@ async function postJson(url, body, options = {}) {
       }
     }
 
-    await new Promise((resolve) => window.setTimeout(resolve, 300 * (attempt + 1)))
+    await new Promise((resolve) => setTimeout(resolve, 300 * (attempt + 1)))
   }
 
   return { ok: false, status: 0, data: {} }
@@ -84,7 +105,7 @@ chrome.contextMenus.onClicked.addListener((info) => {
 registerReloadContextMenu()
 
 const VIJIA_HOST_RE =
-  /^https:\/\/(chatgpt\.com|chat\.openai\.com|claude\.ai|gemini\.google\.com|www\.perplexity\.ai|chat\.deepseek\.com)\//u
+  /^https:\/\/(chatgpt\.com|chat\.openai\.com|claude\.ai|gemini\.google\.com|www\.perplexity\.ai|perplexity\.ai|chat\.deepseek\.com)\//u
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
   void (async () => {

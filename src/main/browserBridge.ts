@@ -280,6 +280,15 @@ async function handleHandshake(
   writeJson(res, 200, response)
 }
 
+async function handleExtensionBootstrap(res: ServerResponse): Promise<void> {
+  await hydrateBridgeTokenFromDisk()
+  const port = bridgeStatus.port ?? resolveBridgePort()
+  writeJson(res, 200, {
+    sessionToken: ensureBridgeToken(),
+    bridgeUrl: `http://127.0.0.1:${port}`
+  })
+}
+
 async function handleCapture(
   req: IncomingMessage,
   res: ServerResponse
@@ -380,6 +389,11 @@ async function handleBridgeRequest(
 
   if (method === 'GET' && url.pathname === '/extension/health') {
     writeJson(res, 200, getHealthResponse())
+    return
+  }
+
+  if (method === 'GET' && url.pathname === '/extension/bootstrap') {
+    await handleExtensionBootstrap(res)
     return
   }
 
