@@ -10,6 +10,14 @@ import {
   readLastSessionNotes,
   type SessionLogNote,
 } from "./session-log";
+import {
+  getEffectiveM3ProactiveCooldownMs,
+  readUserBehavior,
+  type SuggestionStats,
+  type UserBehaviorFile,
+} from "./user-behavior";
+import { getClaudeProxyUrl, getSupabaseClientEnv } from "./supabaseEnv";
+import api, { type ClaudeProxyRequest } from "../shared/Api";
 
 const PROACTIVE_CLAUDE_MAX_TOKENS = 1024;
 
@@ -40,32 +48,70 @@ function summarizeUserBehaviorForPrompt(behavior: UserBehaviorFile): string {
   ].join("\n");
 }
 
+const PROACTIVE_SUGGESTION_TYPES_DESCRIPTION = [
+  '- "guide_offer": offer to help or guide the user through a task they seem stuck on',
+  '- "personal_context": surface relevant context from earlier notes the user may have forgotten',
+  '- "return_nudge": gently nudge the user back to an unfinished task or conversation',
+  '- "important_flag": flag something important the user should know or act on',
+  '- "task_switch": suggest switching to a related task that would be more productive',
+].join("\n");
+
 function buildProactiveUserMessage(
   latestNote: SessionLogNote,
   sessionNotes: SessionLogNote[],
   behavior: UserBehaviorFile,
 ): string {
   return [
-    "Hello, Claude. I'm the user. I'm using Vijia to chat with you.",
+    "You are the proactive assistant inside Vijia, a desktop app that watches the",
+    "user's AI chat sessions (ChatGPT, Claude, Gemini, etc.) and decides whether",
+    "to surface a short, helpful notification to the user.",
     "",
-    "The following note just triggered this proactive check:",
+    "You are NOT chatting with the user. Do not greet, do not ask questions, do",
+    "not narrate what you see. Your only job is to decide: should Vijia show a",
+    "proactive notification right now, and if so, what should it say?",
+    "",
+    "RESPONSE FORMAT — STRICT",
+    "You MUST reply with a single JSON object and nothing else. No prose, no",
+    "markdown, no code fences. The object must match exactly one of these shapes:",
+    "",
+    '  { "should_speak": false }',
+    "",
+    "  {",
+    '    "should_speak": true,',
+    '    "message": "<short notification text, <= 200 chars, second person>",',
+    '    "type": "guide_offer" | "personal_context" | "return_nudge" | "important_flag" | "task_switch",',
+    '    "buttons": [ { "id": "<slug>", "label": "<short label>" } ]   // optional, max 2',
+    "  }",
+    "",
+    "Type meanings:",
+    PROACTIVE_SUGGESTION_TYPES_DESCRIPTION,
+    "",
+    "DECISION RULES",
+    "- Default to { \"should_speak\": false }. Only speak when there is clear,",
+    "  concrete value for the user.",
+    "- Do NOT speak for trivial notes (e.g. \"hi\", \"hello\", empty assistant",
+    "  replies, greeting exchanges, or boilerplate like \"Create an image / Write",
+    "  or edit / Look something up\").",
+    "- Do NOT speak just because a new note arrived. Require a real signal across",
+    "  recent notes (a stuck task, repeated question, abandoned thread, etc.).",
+    "- Respect the cooldown/dismissal stats below: if the user has been",
+    "  dismissing suggestions, be much more conservative.",
+    "- Keep `message` under 200 characters, friendly, specific, and actionable.",
+    "",
+    "CONTEXT",
+    "",
+    "Triggering note:",
     formatSessionNoteForPrompt(latestNote),
     "",
-    "Recent session notes (oldest to newest in this list):",
+    "Recent session notes (oldest to newest):",
     ...sessionNotes.map((n) => formatSessionNoteForPrompt(n)),
     "",
     "User / Vijia behavior summary:",
     summarizeUserBehaviorForPrompt(behavior),
+    "",
+    "Reply now with the JSON object only.",
   ].join("\n");
 }
-import {
-  getEffectiveM3ProactiveCooldownMs,
-  readUserBehavior,
-  type SuggestionStats,
-  type UserBehaviorFile,
-} from "./user-behavior";
-import { getClaudeProxyUrl, getSupabaseClientEnv } from "./supabaseEnv";
-import api, { type ClaudeProxyRequest } from "../shared/Api";
 
 const ALL_TYPES: ProactiveSuggestionType[] = [
   "guide_offer",
@@ -79,26 +125,82 @@ let warnedMissingEnv = false;
 let inflight = false;
 let unsubscribe: (() => void) | null = null;
 
-function safePreview(value: unknown, max = 1000): string {
-  try {
-    const text = typeof value === "string" ? value : JSON.stringify(value);
-    return text.length > max ? `${text.slice(0, max)}...(truncated)` : text;
-  } catch {
-    return "[unserializable]";
-  }
-}
-
 function isProactiveSuggestionType(
   value: unknown,
 ): value is ProactiveSuggestionType {
   return typeof value === "string" && (ALL_TYPES as string[]).includes(value);
 }
 
-function parseProactiveResponse(raw: unknown): ProactiveClaudeResponse | null {
-  if (!raw || typeof raw !== "object") {
+/**
+ * Try to pull a JSON object out of an otherwise non-JSON model reply. Models
+ * sometimes wrap JSON in markdown fences or add prose around it.
+ */
+function extractJsonObjectFromText(text: string): unknown | null {
+  const trimmed = text.trim();
+  if (!trimmed) {
     return null;
   }
-  const o = raw as Record<string, unknown>;
+
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(trimmed);
+  const candidates: string[] = [];
+  if (fenced && fenced[1]) {
+    candidates.push(fenced[1].trim());
+  }
+  const firstBrace = trimmed.indexOf("{");
+  const lastBrace = trimmed.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    candidates.push(trimmed.slice(firstBrace, lastBrace + 1));
+  }
+  candidates.push(trimmed);
+
+  for (const candidate of candidates) {
+    try {
+      const parsed: unknown = JSON.parse(candidate);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed;
+      }
+    } catch {
+      // try next candidate
+    }
+  }
+  return null;
+}
+
+/**
+ * Server returns `{ parse_error: true, raw_text: "..." }` when structured
+ * JSON could not be parsed by the edge function. Try once more to extract
+ * JSON from the raw text; if that fails, treat it as "nothing to say" rather
+ * than surfacing a conversational reply as a suggestion.
+ */
+function parseProactiveFromParseError(
+  o: Record<string, unknown>,
+): ProactiveClaudeResponse | null {
+  if (o.parse_error !== true) {
+    return null;
+  }
+  const raw = o.raw_text;
+  if (typeof raw !== "string" || !raw.trim()) {
+    return { should_speak: false };
+  }
+  const recovered = extractJsonObjectFromText(raw);
+  if (recovered !== null) {
+    const parsed = parseProactiveResponseStrict(
+      recovered as Record<string, unknown>,
+    );
+    if (parsed !== null) {
+      return parsed;
+    }
+  }
+  console.warn(
+    "[Vijia] proactive: claude returned non-JSON text, suppressing notification",
+  );
+  return { should_speak: false };
+}
+
+/** Validate a decoded object against the proactive JSON contract. */
+function parseProactiveResponseStrict(
+  o: Record<string, unknown>,
+): ProactiveClaudeResponse | null {
   if (o.should_speak === false) {
     return { should_speak: false };
   }
@@ -133,6 +235,49 @@ function parseProactiveResponse(raw: unknown): ProactiveClaudeResponse | null {
   };
 }
 
+function parseProactiveResponse(raw: unknown): ProactiveClaudeResponse | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const o = raw as Record<string, unknown>;
+  const fromError = parseProactiveFromParseError(o);
+  if (fromError !== null) {
+    return fromError;
+  }
+  return parseProactiveResponseStrict(o);
+}
+
+const PROACTIVE_UNWRAP_MAX_DEPTH = 4;
+
+/**
+ * Edge may return `{ data: ... }`, `{ payload: ... }`, or both nested. Peel until
+ * we reach the object that has should_speak / parse_error / message etc.
+ */
+function unwrapProactiveResponseBody(input: unknown): unknown {
+  let current: unknown = input;
+  for (let i = 0; i < PROACTIVE_UNWRAP_MAX_DEPTH; i++) {
+    if (!current || typeof current !== "object" || Array.isArray(current)) {
+      break;
+    }
+    const o = current as Record<string, unknown>;
+    if ("data" in o && o.data !== undefined) {
+      current = o.data;
+      continue;
+    }
+    if (
+      "payload" in o &&
+      o.payload !== null &&
+      typeof o.payload === "object" &&
+      !Array.isArray(o.payload)
+    ) {
+      current = o.payload;
+      continue;
+    }
+    break;
+  }
+  return current;
+}
+
 function shouldSkipForCooldown(stats: SuggestionStats): boolean {
   const anchor = stats.lastProactiveShownAt;
   if (anchor === null || anchor === undefined) {
@@ -150,9 +295,7 @@ async function callClaudeProactive(
   if (!env || !url) {
     if (!warnedMissingEnv) {
       warnedMissingEnv = true;
-      console.warn(
-        "[Vijia] Proactive engine: missing VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY; skipping Claude call.",
-      );
+      console.warn("[Vijia] proactive: missing Supabase env, skip");
     }
     return null;
   }
@@ -172,81 +315,29 @@ async function callClaudeProactive(
   };
 
   try {
-    console.debug("[Vijia] proactive claude-proxy request", {
-      url,
-      latestNoteId: latestNote.id,
-      latestNoteSite: latestNote.site,
-      sessionNotesCount: notes.length,
-      behaviorKeys: Object.keys(behavior ?? {}),
-    });
-    console.debug(
-      "[Vijia] proactive claude-proxy request body",
-      safePreview(JSON.stringify(body), 12000),
-    );
-
+    console.log({ body });
     const res = await api.claudeProxy(body);
 
     if (res.status < 200 || res.status >= 300) {
-      const responseText =
-        typeof res.data === "string"
-          ? res.data
-          : res.data != null
-            ? JSON.stringify(res.data)
-            : "[empty response body]";
-      console.warn("[Vijia] proactive claude-proxy HTTP", res.status, {
-        statusText: res.statusText,
-        requestSummary: {
-          latestNoteId: latestNote.id,
-          latestNoteSite: latestNote.site,
-          sessionNotesCount: notes.length,
-        },
-        responseBodyPreview: safePreview(responseText),
-      });
+      console.warn(
+        `[Vijia] proactive: claude-proxy ${res.status} ${res.statusText ?? ""}`.trim(),
+      );
       return null;
     }
-
+    console.log({ res: res.data });
     const json: unknown = res.data;
-    /** Supabase function may wrap body in `{ data: ... }` — accept both. */
-    const payload =
-      json &&
-      typeof json === "object" &&
-      "data" in (json as object) &&
-      (json as { data?: unknown }).data !== undefined
-        ? (json as { data: unknown }).data
-        : json;
-
-    console.debug(
-      "[Vijia] proactive claude-proxy success payload",
-      safePreview(payload),
-    );
-
+    const payload = unwrapProactiveResponseBody(json);
+    console.log({ payload });
     const parsed = parseProactiveResponse(payload);
     if (parsed === null) {
-      const keys =
-        payload && typeof payload === "object"
-          ? Object.keys(payload as object)
-          : [];
-      if (keys.includes("raw_text") && !keys.includes("should_speak")) {
-        console.warn(
-          "[Vijia] claude-proxy returned plain text (`raw_text`), not proactive JSON. " +
-            "The edge function should return { should_speak, message?, type?, buttons? } when `proactive: true` in the request body — " +
-            "e.g. parse the model output as JSON or use a tool/schema response. " +
-            "As-is, Vijia cannot show a notification.",
-          { responseKeys: keys },
-        );
-      } else {
-        console.warn(
-          "[Vijia] proactive claude-proxy: response is not valid proactive JSON (expected should_speak).",
-          { responseKeys: keys, preview: safePreview(payload, 500) },
-        );
-      }
+      console.warn(
+        "[Vijia] proactive: invalid response (need should_speak JSON)",
+      );
     }
     return parsed;
   } catch (error) {
-    console.warn("[Vijia] proactive claude-proxy error:", error, {
-      latestNoteId: latestNote.id,
-      latestNoteSite: latestNote.site,
-    });
+    const msg = error instanceof Error ? error.message : String(error);
+    console.warn(`[Vijia] proactive: ${msg}`);
     return null;
   }
 }
