@@ -8,6 +8,29 @@ export const CLAUDE_PROXY_URL = `${SUPABASE_FUNCTIONS_BASE}/claude-proxy`;
 
 export const GEMINI_DEFAULT_MODEL = "gemini-2.5-flash-preview-04-17";
 
+/** `contents[].parts[]` entry: matches gemini-proxy curl (`{ "text": "..." }` only). */
+export type GeminiProxyPart = { text: string };
+
+export type GeminiProxyContent = { parts: GeminiProxyPart[] };
+
+/** gemini-proxy JSON body — only `model` and `contents` (same shape as the working curl). */
+export type GeminiProxyRequest = { model: string; contents: GeminiProxyContent[] };
+
+/** Single message in a claude-proxy request (Anthropic-style role + content). */
+export type ClaudeProxyMessage = {
+  role: "user" | "assistant" | "system";
+  content: string;
+};
+
+/**
+ * claude-proxy JSON body — only `proactive`, `max_tokens`, and `messages` (same shape as the working curl).
+ */
+export type ClaudeProxyRequest = {
+  proactive: boolean;
+  max_tokens: number;
+  messages: ClaudeProxyMessage[];
+};
+
 export function supabaseHeaders(): Record<string, string> {
   const key = import.meta.env.VITE_SUPABASE_ANON_KEY ?? "";
   return {
@@ -27,11 +50,11 @@ class API {
     });
   }
 
-  async geminiProxy(body: any) {
+  async geminiProxy(body: GeminiProxyRequest) {
     return this.instance.post(GEMINI_PROXY_URL, body);
   }
 
-  async claudeProxy(body: any) {
+  async claudeProxy(body: ClaudeProxyRequest) {
     return this.instance.post(CLAUDE_PROXY_URL, body);
   }
 }
