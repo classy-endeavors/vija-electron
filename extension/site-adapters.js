@@ -252,6 +252,107 @@ const VIJIA_SITE_ADAPTERS = (() => {
     return { user, assistant }
   }
 
+  /**
+   * gemini.google.com (2025+): Angular custom elements in #chat-history —
+   * user-query + model-response; assistant body in .markdown-main-panel.
+   */
+  function isGeminiAssistantNoise(text) {
+    const t = text.trim().toLowerCase()
+    if (t.length < 3) {
+      return true
+    }
+    if (t.length < 120 && /gemini is ai|can make mistakes/.test(t)) {
+      return true
+    }
+    if (t === 'gemini' || t === 'you said' || t === 'gemini said') {
+      return true
+    }
+    return false
+  }
+
+  function getGeminiChatRoot() {
+    return (
+      document.querySelector('[data-test-id="chat-history-container"]') ||
+      document.getElementById('chat-history')
+    )
+  }
+
+  function getGeminiUserTextFromUserQuery(uq) {
+    const line = uq.querySelector('p.query-text-line')
+    if (line) {
+      return normalizeMessageText(line.innerText ?? '')
+    }
+    const bubble = uq.querySelector('.user-query-bubble-with-background .query-text')
+    if (bubble) {
+      return normalizeMessageText(bubble.innerText ?? '')
+    }
+    const qt = uq.querySelector('.query-text')
+    if (qt) {
+      return normalizeMessageText(qt.innerText ?? '')
+    }
+    return normalizeMessageText(uq.innerText ?? '')
+  }
+
+  function getGeminiAssistantTextFromModelResponse(mr) {
+    const panels = mr.querySelectorAll(
+      'div.markdown.markdown-main-panel, .markdown-main-panel, [id^="model-response-message-content"]'
+    )
+    if (!panels.length) {
+      const sc = mr.querySelector('structured-content-container .markdown, message-content .markdown')
+      if (sc) {
+        return normalizeMessageText(sc.innerText ?? '')
+      }
+      return ''
+    }
+    const last = panels[panels.length - 1]
+    return normalizeMessageText(last.innerText ?? '')
+  }
+
+  function extractGeminiFromDom() {
+    const root = getGeminiChatRoot()
+    if (!root) {
+      return null
+    }
+
+    const userEls = root.querySelectorAll('user-query')
+    const modelEls = root.querySelectorAll('model-response')
+
+    let lastUser = ''
+    if (userEls.length) {
+      lastUser = getGeminiUserTextFromUserQuery(
+        userEls[userEls.length - 1]
+      )
+    }
+
+    const assistantChunks = []
+    for (const mr of modelEls) {
+      const t = getGeminiAssistantTextFromModelResponse(mr)
+      if (t) {
+        assistantChunks.push(t)
+      }
+    }
+
+    let lastAssistant = ''
+    for (let i = assistantChunks.length - 1; i >= 0; i -= 1) {
+      const c = assistantChunks[i]
+      if (c && !isGeminiAssistantNoise(c)) {
+        lastAssistant = c
+        break
+      }
+    }
+    if (!lastAssistant && assistantChunks.length) {
+      lastAssistant = assistantChunks[assistantChunks.length - 1]
+    }
+    if (lastAssistant && isGeminiAssistantNoise(lastAssistant)) {
+      lastAssistant = ''
+    }
+
+    if (!lastUser && !lastAssistant) {
+      return null
+    }
+    return { user: lastUser, assistant: lastAssistant }
+  }
+
   const adapters = [
     {
       site: 'chatgpt',
@@ -280,7 +381,7 @@ const VIJIA_SITE_ADAPTERS = (() => {
         return location.hostname === 'gemini.google.com'
       },
       extractLastPair() {
-        return stableExtract(['You'], ['Gemini'])
+        return extractGeminiFromDom()
       }
     },
     {
