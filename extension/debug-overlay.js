@@ -119,7 +119,11 @@
           font-weight: 600;
           color: #f8fafc;
           flex: 0 0 auto;
+          cursor: grab;
+          user-select: none;
+          touch-action: none;
         }
+        #head.dragging { cursor: grabbing; }
         #head small { font-weight: 400; color: #94a3b8; font-size: 10px; }
         #head button {
           font: inherit;
@@ -193,6 +197,74 @@
           void navigator.clipboard.writeText(t).catch(() => {})
         }
       })
+    const rootEl = /** @type {HTMLDivElement | null} */ (shadow.getElementById('root'))
+    const headBar = shadow.getElementById('head')
+    if (rootEl && headBar) {
+      let dragActive = false
+      let startClientX = 0
+      let startClientY = 0
+      let originLeft = 0
+      let originTop = 0
+      let panelW = 0
+      let panelH = 0
+
+      function clamp(n, lo, hi) {
+        return Math.min(hi, Math.max(lo, n))
+      }
+
+      function onDragMove(/** @type {PointerEvent} */ e) {
+        if (!dragActive) {
+          return
+        }
+        const dx = e.clientX - startClientX
+        const dy = e.clientY - startClientY
+        const maxL = Math.max(0, window.innerWidth - panelW)
+        const maxT = Math.max(0, window.innerHeight - panelH)
+        const l = clamp(originLeft + dx, 0, maxL)
+        const t = clamp(originTop + dy, 0, maxT)
+        rootEl.style.left = `${l}px`
+        rootEl.style.top = `${t}px`
+        rootEl.style.right = 'auto'
+        rootEl.style.bottom = 'auto'
+      }
+
+      function onDragEnd() {
+        if (!dragActive) {
+          return
+        }
+        dragActive = false
+        headBar.classList.remove('dragging')
+        document.removeEventListener('pointermove', onDragMove)
+        document.removeEventListener('pointerup', onDragEnd)
+        document.removeEventListener('pointercancel', onDragEnd)
+      }
+
+      headBar.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0) {
+          return
+        }
+        if (e.target && 'closest' in e.target && typeof e.target.closest === 'function' && e.target.closest('button')) {
+          return
+        }
+        e.preventDefault()
+        const r = rootEl.getBoundingClientRect()
+        rootEl.style.left = `${r.left}px`
+        rootEl.style.top = `${r.top}px`
+        rootEl.style.right = 'auto'
+        rootEl.style.bottom = 'auto'
+        originLeft = r.left
+        originTop = r.top
+        panelW = r.width
+        panelH = r.height
+        startClientX = e.clientX
+        startClientY = e.clientY
+        dragActive = true
+        headBar.classList.add('dragging')
+        document.addEventListener('pointermove', onDragMove)
+        document.addEventListener('pointerup', onDragEnd)
+        document.addEventListener('pointercancel', onDragEnd)
+      })
+    }
     document.documentElement.appendChild(host)
     state.host = host
     render()
