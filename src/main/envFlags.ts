@@ -13,3 +13,12 @@ function envFlagStringTrue(raw: string | undefined): boolean {
 export function isCooldownsDisabled(): boolean {
   return envFlagStringTrue(process.env.VIJIA_DISABLE_COOLDOWNS);
 }
+
+/**
+ * When true, proactive uses a user message that instructs the model to always
+ * return `should_speak: true` (see `buildProactiveUserMessageForceSpeak` in
+ * `proactive-engine.ts`). Baked in from `.env` via `electron.vite` `define`.
+ */
+export function isProactiveForceSpeakFromEnv(): boolean {
+  return envFlagStringTrue(process.env.VIJIA_PROACTIVE_FORCE_SPEAK);
+}

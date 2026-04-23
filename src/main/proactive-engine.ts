@@ -18,7 +18,7 @@ import {
 } from "./user-behavior";
 import { getClaudeProxyUrl, getSupabaseClientEnv } from "./supabaseEnv";
 import { isMainProcessDebugMode } from "./debugMode";
-import { isCooldownsDisabled } from "./envFlags";
+import { isCooldownsDisabled, isProactiveForceSpeakFromEnv } from "./envFlags";
 import api, { type ClaudeProxyRequest } from "../shared/Api";
 
 const PROACTIVE_CLAUDE_MAX_TOKENS = 1024;
@@ -33,6 +33,10 @@ const USE_TEST_PROACTIVE_PROMPT = false;
 
 /** Set to false before release: when true, `should_speak: false` still shows a notification. */
 const DEBUG_FORCE_PROACTIVE_ALWAYS_SPEAK = true;
+
+function shouldUseForceSpeakPrompt(): boolean {
+  return isProactiveForceSpeakFromEnv();
+}
 
 function formatSessionNoteForPrompt(note: SessionLogNote): string {
   const title = (note.title ?? "").trim() || "Untitled";
@@ -123,6 +127,57 @@ function buildProactiveUserMessage(
     summarizeUserBehaviorForPrompt(behavior),
     "",
     "Reply now with the JSON object only.",
+  ].join("\n");
+}
+
+/**
+ * "Force speak" user message: instructs the model to **always** return
+ * `should_speak: true` with a real `message` (and `type`), using the same context
+ * as production. Ignores silence/trivial-content rules; use for QA or demos.
+ */
+function buildProactiveUserMessageForceSpeak(
+  latestNote: SessionLogNote,
+  sessionNotes: SessionLogNote[],
+  behavior: UserBehaviorFile,
+): string {
+  return [
+    "FORCE-SPEAK MODE — Vijia proactive (developer / demo).",
+    "",
+    "You MUST respond with exactly one JSON object and nothing else. No markdown",
+    "fences, no commentary before or after. Never use { \"should_speak\": false }.",
+    "",
+    "Required shape:",
+    "  {",
+    '    "should_speak": true,  // always true in this mode',
+    '    "message": "<string, 1–200 chars, second person, based on the triggering note>",',
+    '    "type": "guide_offer" | "personal_context" | "return_nudge" | "important_flag" | "task_switch",',
+    '    "buttons": [ { "id": "<slug>", "label": "<short label>" } ]   // optional, max 2',
+    "  }",
+    "",
+    "Type meanings:",
+    PROACTIVE_SUGGESTION_TYPES_DESCRIPTION,
+    "",
+    "Rules for this mode:",
+    "- `should_speak` MUST be true. Do not return false under any circumstances.",
+    "- `message` MUST be non-empty and must reflect the session context (triggering",
+    "  note + recent notes). Vary the wording; do not repeat a single canned line",
+    "  on every call.",
+    "- If the thread looks light or social, you may still return true with a very",
+    "  short, natural nudge (e.g. a tip, a gentle check-in) tied to what you see—",
+    "  never an empty or placeholder message.",
+    "",
+    "CONTEXT",
+    "",
+    "Triggering note:",
+    formatSessionNoteForPrompt(latestNote),
+    "",
+    "Recent session notes (oldest to newest):",
+    ...sessionNotes.map((n) => formatSessionNoteForPrompt(n)),
+    "",
+    "User / Vijia behavior summary (informational; you still output should_speak true):",
+    summarizeUserBehaviorForPrompt(behavior),
+    "",
+    "Reply with the JSON object only.",
   ].join("\n");
 }
 
@@ -361,9 +416,11 @@ async function callClaudeProactive(
   const notes = await readLastSessionNotes(10);
   const behavior = await readUserBehavior();
 
-  const userContent = USE_TEST_PROACTIVE_PROMPT
-    ? buildProactiveUserMessageTest(latestNote, notes, behavior)
-    : buildProactiveUserMessage(latestNote, notes, behavior);
+  const userContent = shouldUseForceSpeakPrompt()
+    ? buildProactiveUserMessageForceSpeak(latestNote, notes, behavior)
+    : USE_TEST_PROACTIVE_PROMPT
+      ? buildProactiveUserMessageTest(latestNote, notes, behavior)
+      : buildProactiveUserMessage(latestNote, notes, behavior);
 
   const body: ClaudeProxyRequest = {
     proactive: true,

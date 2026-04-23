@@ -24,6 +24,7 @@ export default defineConfig(({ mode }) => {
   const viteKey = env['VITE_SUPABASE_ANON_KEY'] ?? ''
   const vijiaDebug = env['VIJIA_DEBUG'] ?? ''
   const vijiaDisableCooldowns = env['VIJIA_DISABLE_COOLDOWNS'] ?? ''
+  const vijiaProactiveForceSpeak = env['VIJIA_PROACTIVE_FORCE_SPEAK'] ?? ''
 
   return {
   main: {
@@ -33,6 +34,9 @@ export default defineConfig(({ mode }) => {
       'process.env.VIJIA_DEBUG': JSON.stringify(vijiaDebug),
       'process.env.VIJIA_DISABLE_COOLDOWNS': JSON.stringify(
         vijiaDisableCooldowns
+      ),
+      'process.env.VIJIA_PROACTIVE_FORCE_SPEAK': JSON.stringify(
+        vijiaProactiveForceSpeak
       )
     },
     build: {
