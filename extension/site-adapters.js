@@ -353,6 +353,69 @@ const VIJIA_SITE_ADAPTERS = (() => {
     return { user: lastUser, assistant: lastAssistant }
   }
 
+  /**
+   * claude.ai: user bubbles + Claude markdown (no body-text fallbacks).
+   * Assistant: .standard-markdown / .progressive-markdown under .font-claude-response
+   * (omits tool strips like "Searched the web" above the main grid cell).
+   */
+  function isClaudeAssistantNoise(text) {
+    const t = text.trim().toLowerCase()
+    if (t.length < 3) {
+      return true
+    }
+    if (
+      t.length < 200 &&
+      /claude is ai|can make mistakes|double-check cited|please double-check/.test(t)
+    ) {
+      return true
+    }
+    if (t === 'claude' || t === 'claude said') {
+      return true
+    }
+    return false
+  }
+
+  function extractClaudeUserFromDom() {
+    const bubbles = document.querySelectorAll('[data-user-message-bubble="true"]')
+    if (!bubbles.length) {
+      return ''
+    }
+    const b = bubbles[bubbles.length - 1]
+    const fromTestId = b.querySelector('[data-testid="user-message"]')
+    if (fromTestId) {
+      return normalizeMessageText(fromTestId.innerText ?? '')
+    }
+    const pre = b.querySelector('p.whitespace-pre-wrap, .whitespace-pre-wrap')
+    if (pre) {
+      return normalizeMessageText(pre.innerText ?? '')
+    }
+    return normalizeMessageText(b.innerText ?? '')
+  }
+
+  function extractClaudeAssistantFromDom() {
+    const panels = document.querySelectorAll(
+      '.font-claude-response .standard-markdown, .font-claude-response .progressive-markdown'
+    )
+    if (!panels.length) {
+      return ''
+    }
+    const last = panels[panels.length - 1]
+    const t = normalizeMessageText(last.innerText ?? '')
+    if (t && isClaudeAssistantNoise(t)) {
+      return ''
+    }
+    return t
+  }
+
+  function extractClaudeFromDom() {
+    const user = extractClaudeUserFromDom()
+    const assistant = extractClaudeAssistantFromDom()
+    if (!user && !assistant) {
+      return null
+    }
+    return { user, assistant }
+  }
+
   const adapters = [
     {
       site: 'chatgpt',
@@ -372,7 +435,7 @@ const VIJIA_SITE_ADAPTERS = (() => {
         return location.hostname === 'claude.ai'
       },
       extractLastPair() {
-        return stableExtract(['You', 'Human'], ['Claude', 'Assistant'])
+        return extractClaudeFromDom()
       }
     },
     {
