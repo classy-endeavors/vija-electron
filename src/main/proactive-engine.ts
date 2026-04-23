@@ -17,6 +17,8 @@ import {
   type UserBehaviorFile,
 } from "./user-behavior";
 import { getClaudeProxyUrl, getSupabaseClientEnv } from "./supabaseEnv";
+import { isMainProcessDebugMode } from "./debugMode";
+import { isCooldownsDisabled } from "./envFlags";
 import api, { type ClaudeProxyRequest } from "../shared/Api";
 
 const PROACTIVE_CLAUDE_MAX_TOKENS = 1024;
@@ -27,7 +29,7 @@ const PROACTIVE_CLAUDE_MAX_TOKENS = 1024;
  * a valid JSON response with `should_speak: true` so you can verify the proxy
  * and notification path end-to-end. Set to false to use the real prompt.
  */
-const USE_TEST_PROACTIVE_PROMPT = true;
+const USE_TEST_PROACTIVE_PROMPT = false;
 
 /** Set to false before release: when true, `should_speak: false` still shows a notification. */
 const DEBUG_FORCE_PROACTIVE_ALWAYS_SPEAK = true;
@@ -240,9 +242,11 @@ function parseProactiveFromParseError(
       return parsed;
     }
   }
-  console.warn(
-    "[Vijia] proactive: claude returned non-JSON text, suppressing notification",
-  );
+  if (isMainProcessDebugMode()) {
+    console.warn(
+      "[Vijia] proactive: claude returned non-JSON text, suppressing notification",
+    );
+  }
   return { should_speak: false };
 }
 
@@ -328,6 +332,9 @@ function unwrapProactiveResponseBody(input: unknown): unknown {
 }
 
 function shouldSkipForCooldown(stats: SuggestionStats): boolean {
+  if (isCooldownsDisabled()) {
+    return false;
+  }
   const anchor = stats.lastProactiveShownAt;
   if (anchor === null || anchor === undefined) {
     return false;
@@ -344,7 +351,9 @@ async function callClaudeProactive(
   if (!env || !url) {
     if (!warnedMissingEnv) {
       warnedMissingEnv = true;
-      console.warn("[Vijia] proactive: missing Supabase env, skip");
+      if (isMainProcessDebugMode()) {
+        console.warn("[Vijia] proactive: missing Supabase env, skip");
+      }
     }
     return null;
   }
@@ -368,29 +377,45 @@ async function callClaudeProactive(
   };
 
   try {
-    console.log({ body });
+    if (isMainProcessDebugMode()) {
+      console.log("[Vijia][debug] proactive claude-proxy request:", body);
+    }
     const res = await api.claudeProxy(body);
 
     if (res.status < 200 || res.status >= 300) {
-      console.warn(
-        `[Vijia] proactive: claude-proxy ${res.status} ${res.statusText ?? ""}`.trim(),
-      );
+      if (isMainProcessDebugMode()) {
+        console.warn(
+          `[Vijia] proactive: claude-proxy ${res.status} ${res.statusText ?? ""}`.trim(),
+        );
+      }
       return null;
     }
-    console.log({ res: res.data });
+    if (isMainProcessDebugMode()) {
+      console.log(
+        "[Vijia][debug] proactive claude-proxy raw response:",
+        res.data,
+      );
+    }
     const json: unknown = res.data;
     const payload = unwrapProactiveResponseBody(json);
-    console.log({ payload });
+    if (isMainProcessDebugMode()) {
+      console.log("[Vijia][debug] proactive unwrapped payload:", payload);
+    }
     const parsed = parseProactiveResponse(payload);
-    if (parsed === null) {
+    if (isMainProcessDebugMode() && parsed !== null) {
+      console.log("[Vijia][debug] proactive parsed result:", parsed);
+    }
+    if (parsed === null && isMainProcessDebugMode()) {
       console.warn(
         "[Vijia] proactive: invalid response (need should_speak JSON)",
       );
     }
     return parsed;
   } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.warn(`[Vijia] proactive: ${msg}`);
+    if (isMainProcessDebugMode()) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.warn(`[Vijia] proactive: ${msg}`);
+    }
     return null;
   }
 }
@@ -429,22 +454,81 @@ function mapButtons(
 
 async function handleNote(note: SessionLogNote): Promise<void> {
   if (inflight) {
+    if (isMainProcessDebugMode()) {
+      console.log("[Vijia][debug] proactive handleNote: skip (inflight)", {
+        noteId: note.id,
+        site: note.site,
+      });
+    }
     return;
   }
   inflight = true;
   try {
+    if (isMainProcessDebugMode()) {
+      console.log("[Vijia][debug] proactive handleNote: start", {
+        noteId: note.id,
+        site: note.site,
+        title: note.title,
+        url: note.url,
+        userLen: (note.user ?? "").length,
+        assistantLen: (note.assistant ?? "").length,
+      });
+    }
     const stats = (await readUserBehavior()).suggestion_stats;
     if (shouldSkipForCooldown(stats)) {
+      if (isMainProcessDebugMode()) {
+        const anchor = stats.lastProactiveShownAt;
+        const effectiveMs = getEffectiveM3ProactiveCooldownMs(
+          BASE_COOLDOWN_MS,
+          stats,
+        );
+        const elapsedMs = anchor != null ? Date.now() - anchor : 0;
+        console.log("[Vijia][debug] proactive handleNote: skip (cooldown)", {
+          noteId: note.id,
+          lastProactiveShownAt: anchor,
+          effectiveCooldownMs: effectiveMs,
+          elapsedSinceLastShowMs: elapsedMs,
+          cooldownMultiplier: stats.cooldownMultiplier,
+        });
+      }
       return;
     }
 
     const parsed = await callClaudeProactive(note);
+    if (isMainProcessDebugMode()) {
+      console.log("[Vijia][debug] proactive handleNote: claude parsed", {
+        noteId: note.id,
+        parsed,
+      });
+    }
     const effective = applyDebugForceProactiveSpeak(parsed);
+    if (isMainProcessDebugMode()) {
+      console.log("[Vijia][debug] proactive handleNote: after applyDebugForce", {
+        noteId: note.id,
+        effective,
+      });
+    }
     if (!effective || effective.should_speak === false) {
+      if (isMainProcessDebugMode()) {
+        console.log("[Vijia][debug] proactive handleNote: skip (no notification)", {
+          noteId: note.id,
+          reason: !effective
+            ? "claude call failed or unparseable"
+            : "should_speak is false",
+        });
+      }
       return;
     }
 
     const actions = mapButtons(effective.buttons);
+    if (isMainProcessDebugMode()) {
+      console.log("[Vijia][debug] proactive handleNote: calling notify", {
+        noteId: note.id,
+        message: effective.message,
+        type: effective.type,
+        actionCount: actions.length,
+      });
+    }
     notificationManager.notify({
       message: effective.message,
       contextSource: `Proactive — ${effective.type}`,

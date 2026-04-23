@@ -13,6 +13,7 @@ import {
   recordProactiveNotificationShown,
   recordProactiveOutcome
 } from './user-behavior'
+import { isCooldownsDisabled } from './envFlags'
 
 /**
  * Main-process notification engine: priorities, cooldown, adaptive multiplier,
@@ -58,7 +59,7 @@ export class NotificationManager {
   notify(payload: NotifyPayload): void {
     const priority: NotificationPriority = payload.priority ?? 'normal'
 
-    if (priority === 'normal') {
+    if (priority === 'normal' && !isCooldownsDisabled()) {
       const now = Date.now()
       if (now - this.lastNormalShownAt < this.getEffectiveCooldownMs()) {
         return
