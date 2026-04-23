@@ -471,6 +471,77 @@ const VIJIA_SITE_ADAPTERS = (() => {
     return { user, assistant }
   }
 
+  /**
+   * chat.deepseek.com: virtual list with alternating user / assistant rows.
+   * User: .ds-message without .ds-markdown (plain text bubble). Assistant: .ds-message .ds-markdown.
+   * No body / marker fallbacks.
+   */
+  function isDeepSeekAssistantNoise(text) {
+    const t = text.trim().toLowerCase()
+    if (t.length < 3) {
+      return true
+    }
+    if (
+      t.length < 120 &&
+      /ai-generated, for reference only|message deepseek/.test(t)
+    ) {
+      return true
+    }
+    return false
+  }
+
+  function getDeepSeekListRoot() {
+    return (
+      document.querySelector('.ds-virtual-list') ||
+      document.querySelector('.ds-virtual-list-items') ||
+      null
+    )
+  }
+
+  function extractDeepSeekUserFromDom() {
+    const root = getDeepSeekListRoot()
+    if (!root) {
+      return ''
+    }
+    const userChunks = []
+    root.querySelectorAll('.ds-message').forEach((el) => {
+      if (el.querySelector('.ds-markdown')) {
+        return
+      }
+      const t = normalizeMessageText(el.innerText ?? '')
+      if (t) {
+        userChunks.push(t)
+      }
+    })
+    return userChunks.length ? userChunks[userChunks.length - 1] : ''
+  }
+
+  function extractDeepSeekAssistantFromDom() {
+    const root = getDeepSeekListRoot()
+    if (!root) {
+      return ''
+    }
+    const mds = root.querySelectorAll('.ds-message .ds-markdown')
+    if (!mds.length) {
+      return ''
+    }
+    const last = mds[mds.length - 1]
+    let t = normalizeMessageText(last.innerText ?? '')
+    if (t && isDeepSeekAssistantNoise(t)) {
+      t = ''
+    }
+    return t
+  }
+
+  function extractDeepSeekFromDom() {
+    const user = extractDeepSeekUserFromDom()
+    const assistant = extractDeepSeekAssistantFromDom()
+    if (!user && !assistant) {
+      return null
+    }
+    return { user, assistant }
+  }
+
   const adapters = [
     {
       site: 'chatgpt',
@@ -520,7 +591,7 @@ const VIJIA_SITE_ADAPTERS = (() => {
         return location.hostname === 'chat.deepseek.com'
       },
       extractLastPair() {
-        return stableExtract(['You'], ['DeepSeek'])
+        return extractDeepSeekFromDom()
       }
     }
   ]
