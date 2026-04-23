@@ -189,6 +189,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return
     }
 
+    const ex = message.payload?.extract
+    const uLen = String(ex?.user ?? '').trim().length
+    const aLen = String(ex?.assistant ?? '').trim().length
+    if (!ex || uLen === 0 || aLen === 0) {
+      sendResponse({ ok: true, skipped: true, reason: 'incomplete-pair' })
+      return
+    }
+
     const payload = buildCapturePayload(message, sender, settings.sessionToken)
     const response = await postJson(
       `${settings.bridgeUrl}/extension/capture`,

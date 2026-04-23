@@ -72,6 +72,34 @@ const VIJIA_SITE_ADAPTERS = (() => {
     if (t === 'chatgpt' || t === 'you' || t.length < 3) {
       return true
     }
+    // Composer / empty-thread quick actions — not a model reply (often last block in main's innerText).
+    if (t.length < 500) {
+      if (/\bcreate an image\b/.test(t) && (/\bwrite or edit\b/.test(t) || /\blook something up\b/.test(t))) {
+        return true
+      }
+      if (/\bmake (an? )?image\b/.test(t) && /\b(ask anything|add files|add photos)\b/.test(t)) {
+        return true
+      }
+      const lines = t
+        .split(/\n+/)
+        .map((L) => L.trim())
+        .filter(Boolean)
+      if (
+        t.length < 200 &&
+        lines.length >= 2 &&
+        lines.length <= 6 &&
+        lines.every((L) => L.length < 70)
+      ) {
+        const actionLike = lines.filter((L) =>
+          /create an image|make an image|write or edit|look something|add files|add photos|stylus|canvas|deep research|code interpreter|search( the web)?$|ask anything|image generation|new chat|voice mode/i.test(
+            L
+          )
+        ).length
+        if (actionLike >= 2) {
+          return true
+        }
+      }
+    }
     return false
   }
 
@@ -110,20 +138,28 @@ const VIJIA_SITE_ADAPTERS = (() => {
       return normalizeMessageText(turn.innerText ?? '')
     }
     if (role === 'assistant') {
+      let t = ''
       const fromData = turn.querySelector('[data-message-content]')
       if (fromData) {
-        const t = normalizeMessageText(fromData.innerText ?? '')
+        t = normalizeMessageText(fromData.innerText ?? '')
         if (t) {
-          return t
+          return isChatGptAssistantNoise(t) ? '' : t
         }
       }
       const md =
         turn.querySelector('div.markdown, .markdown.prose, .markdown') ||
         turn.querySelector('[class*="markdown"]')
       if (md) {
-        return normalizeMessageText(md.innerText ?? '')
+        t = normalizeMessageText(md.innerText ?? '')
+        if (t) {
+          return isChatGptAssistantNoise(t) ? '' : t
+        }
       }
-      return normalizeMessageText(turn.innerText ?? '')
+      t = normalizeMessageText(turn.innerText ?? '')
+      if (t && isChatGptAssistantNoise(t)) {
+        return ''
+      }
+      return t
     }
     return ''
   }
@@ -197,19 +233,43 @@ const VIJIA_SITE_ADAPTERS = (() => {
    * Fallback: walk all role nodes in document order (older layouts, tools UIs, iframes absent).
    */
   function extractChatGptByAuthorRoleNodes() {
-    const turnRoots = document.querySelectorAll('[data-message-author-role]')
+    const fromThread = (() => {
+      const s = document.querySelector('section[data-testid^="conversation-turn-"]')
+      if (s?.parentElement) {
+        return s.parentElement.querySelectorAll('[data-message-author-role]')
+      }
+      return null
+    })()
+    const turnRoots = fromThread?.length
+      ? fromThread
+      : document.querySelectorAll('[data-message-author-role]')
     if (!turnRoots.length) {
       return null
     }
     return buildChatGptLastPairFromTurns(turnRoots)
   }
 
+  /** Reject a pair if assistant text is clearly UI chrome, so we fall back to the next strategy. */
+  function nonNoiseChatGptPair(pair) {
+    if (!pair) {
+      return null
+    }
+    const a = String(pair.assistant ?? '').trim()
+    if (!a || isChatGptAssistantNoise(a)) {
+      return null
+    }
+    return pair
+  }
+
   function extractChatGptLastPair() {
     return (
-      extractChatGptByConversationTurns() ??
-      extractChatGptByAuthorRoleNodes() ??
-      extractChatGptHeuristicPlaintext() ??
-      stableExtract(['You', 'User'], ['ChatGPT', 'Assistant'])
+      nonNoiseChatGptPair(extractChatGptByConversationTurns()) ??
+      nonNoiseChatGptPair(extractChatGptByAuthorRoleNodes()) ??
+      nonNoiseChatGptPair(extractChatGptHeuristicPlaintext()) ??
+      nonNoiseChatGptPair(
+        stableExtract(['You', 'User'], ['ChatGPT', 'Assistant'])
+      ) ??
+      null
     )
   }
 

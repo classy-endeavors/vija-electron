@@ -113,12 +113,28 @@ async function emitCapture(reason) {
   }
 
   const pair = await waitForStableExtract(adapter)
-  if (!pair || (!pair.user && !pair.assistant)) {
+  if (!pair) {
     d?.log({ kind: 'skip', detail: `empty extract (retry ${emptyPairRetries + 1}/${VIJIA_EMPTY_PAIR_RETRY_MAX})` })
     if (emptyPairRetries < VIJIA_EMPTY_PAIR_RETRY_MAX) {
       emptyPairRetries += 1
       window.setTimeout(() => {
         enqueueEmitCapture(`retry-empty-${emptyPairRetries}`)
+      }, 2200)
+    }
+    return
+  }
+
+  const userChars = String(pair.user ?? '').trim().length
+  const assistantChars = String(pair.assistant ?? '').trim().length
+  if (userChars === 0 || assistantChars === 0) {
+    d?.log({
+      kind: 'skip',
+      detail: `incomplete pair user=${userChars}ch asst=${assistantChars}ch (retry ${emptyPairRetries + 1}/${VIJIA_EMPTY_PAIR_RETRY_MAX})`
+    })
+    if (emptyPairRetries < VIJIA_EMPTY_PAIR_RETRY_MAX) {
+      emptyPairRetries += 1
+      window.setTimeout(() => {
+        enqueueEmitCapture(`retry-incomplete-${emptyPairRetries}`)
       }, 2200)
     }
     return
@@ -179,6 +195,10 @@ function sendCaptureToExtension(payload) {
               kind: 'bridge',
               detail: `error: ${chrome.runtime.lastError.message ?? 'unknown'}`
             })
+            return
+          }
+          if (response?.skipped) {
+            d.log({ kind: 'bridge', detail: 'skip: incomplete pair (not posted)' })
             return
           }
           if (response?.ok) {
