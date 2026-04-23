@@ -416,6 +416,61 @@ const VIJIA_SITE_ADAPTERS = (() => {
     return { user, assistant }
   }
 
+  /**
+   * perplexity.ai: user bubble in h1.group/query; answer in #markdown-content-N.
+   * No body / marker fallbacks.
+   */
+  function isPerplexityAssistantNoise(text) {
+    const t = text.trim().toLowerCase()
+    if (t.length < 3) {
+      return true
+    }
+    if (
+      t.length < 200 &&
+      /perplexity is ai|viewing a shared thread|ask a follow-up/.test(t)
+    ) {
+      return true
+    }
+    return false
+  }
+
+  function extractPerplexityUserFromDom() {
+    const heads = document.querySelectorAll('h1[class*="group/query"]')
+    if (!heads.length) {
+      return ''
+    }
+    const h = heads[heads.length - 1]
+    const inBubble = h.querySelector(
+      '[class*="bg-subtle"] span.min-w-0, .bg-subtle span, [class*="rounded-2xl"] span'
+    )
+    if (inBubble) {
+      return normalizeMessageText(inBubble.innerText ?? '')
+    }
+    return normalizeMessageText(h.innerText ?? '')
+  }
+
+  function extractPerplexityAssistantFromDom() {
+    const blocks = document.querySelectorAll('[id^="markdown-content-"]')
+    if (!blocks.length) {
+      return ''
+    }
+    const el = blocks[blocks.length - 1]
+    let t = normalizeMessageText(el.innerText ?? '')
+    if (t && isPerplexityAssistantNoise(t)) {
+      t = ''
+    }
+    return t
+  }
+
+  function extractPerplexityFromDom() {
+    const user = extractPerplexityUserFromDom()
+    const assistant = extractPerplexityAssistantFromDom()
+    if (!user && !assistant) {
+      return null
+    }
+    return { user, assistant }
+  }
+
   const adapters = [
     {
       site: 'chatgpt',
@@ -456,7 +511,7 @@ const VIJIA_SITE_ADAPTERS = (() => {
         )
       },
       extractLastPair() {
-        return stableExtract(['You'], ['Perplexity'])
+        return extractPerplexityFromDom()
       }
     },
     {
