@@ -1,40 +1,80 @@
-# Vijia Browser Extension
+# Vijia Browser Bridge (Chrome extension)
 
-This is the Milestone 3 Chrome extension scaffold for sending AI-chat browser context to the local Vijia Electron app.
+**Manifest V3** extension that runs on supported AI chat sites, extracts the latest **user + assistant** message pair, and **POSTs** it to the local Vijia Electron app over **loopback HTTP** (`127.0.0.1`). The app owns auth, deduplication, persistence, and downstream behavior.
 
-## Current Shape
+## Architecture (end-to-end)
 
-- `content-script.js` watches supported AI chat pages
-- `site-adapters.js` provides simple site matching and extraction heuristics
-- `service-worker.js` forwards captures to the Electron localhost bridge
-- `options.html` and `options.js` let you configure bridge URL and session token
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│  Supported tab (ChatGPT, Claude, Gemini, Perplexity, DeepSeek)  │
+├─────────────────────────────────────────────────────────────────┤
+│  site-adapters.js    Per-site heuristics → { user, assistant }  │
+│  content-script.js   Observers + debounce → chrome.runtime      │
+│                      .sendMessage({ type: 'VIJIA_CAPTURE' })   │
+├─────────────────────────────────────────────────────────────────┤
+│  service-worker.js   Adds sessionToken, tab/frame ids, POSTs    │
+│                      to Electron: /extension/capture            │
+├─────────────────────────────────────────────────────────────────┤
+│  Electron (browserBridge.ts)  Token check, dedupe, session log, │
+│                               events                            │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-## Supported Sites
+## File map
 
-- ChatGPT
-- Claude
-- Gemini
-- Perplexity
-- DeepSeek
+| File | Role |
+|------|------|
+| `manifest.json` | MV3: service worker, content scripts, `host_permissions` for chat sites + `http://127.0.0.1/*`, `options_page`, `storage` / `tabs` / `contextMenus`. |
+| `site-adapters.js` | IIFE exposing `VIJIA_SITE_ADAPTERS.detectAdapter()`. Per-site `extractLastPair()`; ChatGPT has DOM role-based extraction + plaintext fallback. |
+| `content-script.js` | Schedules capture on user activity; stability wait; dedupes by hash; sends `VIJIA_CAPTURE` to the service worker. Listens for `VIJIA_SCHEDULE_CAPTURE` from the worker (tab focus). |
+| `service-worker.js` | Token/bootstrap, `POST /extension/handshake` and `/extension/capture`, toolbar badge, context menu “Reload extension”, `tabs.onActivated` → content script `tab-switch`. |
+| `options.html` + `options.js` | Edit `bridgeUrl` and `sessionToken` in `chrome.storage.local`. |
 
-## Load Unpacked
+## Debug overlay (development)
 
-1. Open `chrome://extensions`
-2. Enable `Developer mode`
-3. Click `Load unpacked`
-4. Select this `extension/` folder
-5. Open the extension options page and set the bridge URL and token
+In the extension **options** page, enable **Debug: show on-page overlay**, then **reload** the chat tab. A small panel in the lower-right (Shadow DOM) logs debounced `schedule` reasons, `emit` / `send` (sizes), `bridge` HTTP results, and skips (hidden page, no adapter, dedupe). The panel can **minimize**, **copy** the log, or **close** (turns debug off in storage). Turn debug off for normal use.
 
-## Bridge Defaults
+## Pairing with Electron
 
-- URL: `http://127.0.0.1:45731`
-- Token: must match the Electron app token
+1. With Vijia running, the app prints the bridge config path in the dev console (`Extension bridge config: …`) and may mirror values under project `.vijia/browser-extension-bridge.json` in dev.
+2. Default **bridge URL**: `http://127.0.0.1:45731` (port comes from the app).
+3. **Session token** is required. If empty, the service worker tries **`GET /extension/bootstrap`** to pull `sessionToken` (and optionally `bridgeUrl`) from the running app and store them.
+4. Otherwise, paste `sessionToken` (and URL if needed) in the extension **Options** page.
 
-## Pairing
+## Service worker behavior
 
-When the Electron app starts, it writes a local config file named `browser-extension-bridge.json` under the app's Electron `userData` folder. Use the `bridgeUrl` and `sessionToken` values from that file in the extension options page.
+- **`getSettings()`** — Reads `bridgeUrl` + `sessionToken` from storage; if token missing, fetches bootstrap from `${bridgeUrl}/extension/bootstrap` and persists on success.
+- **`POST /extension/handshake`** — On install, startup, and service worker wake; sends `{ token, extensionVersion }`. Badge: **ON** (green) / **OFF** (red) / **SET** (amber, no token).
+- **`VIJIA_CAPTURE` messages** — Builds a normalized payload (`schema`, `eventId`, `capturedAt`, `site`, `url`, `title`, `tabId`, `frameId`, `source: 'browser-extension'`, `extract`, `pageState`) and **`POST /extension/capture`**. Retries on 5xx with backoff.
+- **`chrome.tabs.onActivated`** — If the active tab is a supported host, sends **`VIJIA_SCHEDULE_CAPTURE`** with reason `tab-switch` so the content script can debounce and capture after switching back to a chat tab.
 
-## Notes
+## Content script: when it captures
 
-- Extraction is intentionally heuristic right now and should be tightened per site during Milestone 3 implementation.
-- The extension currently forwards raw last-pair text to Electron; the app remains responsible for final scrubbing, dedupe, persistence, and downstream AI calls.
+- **Global debounce**: every trigger routes through a **10s** debounce (`VIJIA_CAPTURE_DEBOUNCE_MS`); the timer resets on new activity so bursts collapse to one run.
+- **Stability**: before sending, **`waitForStableExtract`** polls the adapter up to 5 times with 1s delay so the last user/assistant pair does not change between reads.
+- **Dedup**: `buildHash` over `site`, `title`, and `pair`; identical payloads are not sent twice.
+- **Empty pair**: if extraction is empty, schedules up to **4** retries ~2.2s apart.
+- **Visibility**: no capture when `document.visibilityState === 'hidden'`.
+- **Tab switch** (from worker): `visibilitychange` schedules `app-switch` (hidden) and `tab-switch` (visible); **scroll** (400ms after scroll end) → `scroll-pause`; **keydown** → `typing-start`; **keyup** (800ms idle) → `typing-stop`; **MutationObserver** (1.5s DOM idle) → `typing-stop`.
+- **Startup**: initial `scheduleCapture('typing-stop')` plus one-shot **`startup-delay-*`** at 2.5s, 6s, 12s to catch late SPA mounts.
+
+## Site adapters (extraction)
+
+- **ChatGPT / OpenAI**: When present, walks `section[data-testid^="conversation-turn-"]` in order, then per-turn `[data-message-author-role]`: user text from `.user-message-bubble-color` / pre-wrap, assistant from `div.markdown` (with `[data-message-content]` / innerText fallbacks). Then falls back to a document-wide role walk, **main** paragraph heuristics, and marker `stableExtract`. Filters short “noise” assistant lines.
+- **Gemini**: Only DOM-scoped: `[data-test-id="chat-history-container"]` or `#chat-history`, last `user-query` (`p.query-text-line` / `.query-text`) and last `model-response` (`.markdown-main-panel` / `message-content`). No body-text or marker fallbacks (avoids wrong captures).
+- **Claude**: DOM-only — last `[data-user-message-bubble="true"]` (prefer `[data-testid="user-message"]` / `p.whitespace-pre-wrap`) and last `.font-claude-response .standard-markdown` (or `.progressive-markdown`). No body / marker fallbacks.
+- **Perplexity**: DOM-only — last `h1[class*="group/query"]` (text in the `bg-subtle` bubble `span`) and last `[id^="markdown-content-"]` for the answer body. No body / marker fallbacks.
+- **DeepSeek**: DOM-only under `.ds-virtual-list` — last `.ds-message` **without** `.ds-markdown` (user bubble) and last `.ds-message .ds-markdown` (answer). No body / marker fallbacks.
+
+Extraction is **heuristic**; the app may still scrub or dedupe on ingest.
+
+## Loading unpacked
+
+1. `chrome://extensions` → Developer mode → **Load unpacked** → select this `extension/` folder.
+2. Open **extension options**; confirm bridge URL and session token (or rely on bootstrap with the app running).
+3. Optional: extension toolbar → right-click → **Reload extension** (context menu) after code changes.
+
+## Related repo docs
+
+- `docs/milestone-3-chrome-extension-architecture.md` — product/architecture context for M3.
+- Electron implementation: `src/main/browserBridge.ts` (`/extension/bootstrap`, `handshake`, `capture`, health).

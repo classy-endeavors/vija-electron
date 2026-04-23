@@ -3,7 +3,8 @@ const RELOAD_MENU_ID = 'vijia-reload-extension'
 const DEFAULT_BRIDGE_URL = 'http://127.0.0.1:45731'
 const DEFAULT_SETTINGS = {
   bridgeUrl: DEFAULT_BRIDGE_URL,
-  sessionToken: ''
+  sessionToken: '',
+  debugOverlay: false
 }
 
 async function getSettings() {

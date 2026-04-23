@@ -57,6 +57,28 @@
       <label for="bridgeUrl">Bridge URL</label>
       <input id="bridgeUrl" type="text" />
 
+      <div
+        class="row-debug"
+        style="margin: 20px 0; padding: 12px; background: #f9fafb; border-radius: 8px; border: 1px solid #e5e7eb"
+      >
+        <label style="display: flex; align-items: flex-start; gap: 10px; font-weight: 600; margin: 0; cursor: pointer">
+          <input
+            id="debugOverlay"
+            type="checkbox"
+            style="width: auto; margin-top: 3px"
+          />
+          <span>
+            Debug: show on-page overlay
+            <span
+              style="display: block; font-weight: 400; color: #6b7280; font-size: 13px; margin-top: 4px"
+            >
+              On supported sites, logs capture scheduling, extraction, and bridge posts. Development only; reload chat
+              tabs after toggling.
+            </span>
+          </span>
+        </label>
+      </div>
+
       <label for="sessionToken">Session Token</label>
       <input id="sessionToken" type="text" spellcheck="false" autocomplete="off" />
       <p style="font-size: 14px; color: #374151; line-height: 1.5">

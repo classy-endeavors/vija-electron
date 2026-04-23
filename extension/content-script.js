@@ -19,6 +19,40 @@ let typingStopTimer = null
 let scrollStopTimer = null
 let domIdleTimer = null
 
+/** Throttle noisy `scheduleCapture` reasons in the debug overlay. */
+let debugSchedLogTypingStart = 0
+let debugSchedLogAny = 0
+
+function debug() {
+  return window.__VijiaExtDebug
+}
+
+function logDebugSchedule(reason) {
+  const d = debug()
+  if (!d?.isEnabled()) {
+    return
+  }
+  const now = Date.now()
+  if (reason === 'typing-start') {
+    if (now - debugSchedLogTypingStart < 2000) {
+      return
+    }
+    debugSchedLogTypingStart = now
+    debugSchedLogAny = now
+    d.log({ kind: 'sched', detail: reason })
+    return
+  }
+  if (now - debugSchedLogAny < 500) {
+    return
+  }
+  debugSchedLogAny = now
+  d.log({ kind: 'sched', detail: reason })
+}
+
+if (chrome.runtime?.id && window.__VijiaExtDebug) {
+  window.__VijiaExtDebug.start()
+}
+
 function buildHash(input) {
   let hash = 0
   for (let index = 0; index < input.length; index += 1) {
@@ -62,17 +96,25 @@ function enqueueEmitCapture(reason) {
 }
 
 async function emitCapture(reason) {
+  const d = debug()
+  if (d?.isEnabled()) {
+    d.log({ kind: 'emit', detail: `start ${reason}` })
+  }
+
   const adapter = VIJIA_SITE_ADAPTERS.detectAdapter()
   if (!adapter) {
+    d?.log({ kind: 'skip', detail: 'no site adapter' })
     return
   }
 
   if (document.visibilityState === 'hidden') {
+    d?.log({ kind: 'skip', detail: 'page hidden' })
     return
   }
 
   const pair = await waitForStableExtract(adapter)
   if (!pair || (!pair.user && !pair.assistant)) {
+    d?.log({ kind: 'skip', detail: `empty extract (retry ${emptyPairRetries + 1}/${VIJIA_EMPTY_PAIR_RETRY_MAX})` })
     if (emptyPairRetries < VIJIA_EMPTY_PAIR_RETRY_MAX) {
       emptyPairRetries += 1
       window.setTimeout(() => {
@@ -93,10 +135,17 @@ async function emitCapture(reason) {
   )
 
   if (hash === lastSentHash) {
+    d?.log({ kind: 'skip', detail: 'deduped (unchanged hash)' })
     return
   }
 
   lastSentHash = hash
+
+  if (d?.isEnabled()) {
+    const u = pair.user?.length ?? 0
+    const a = pair.assistant?.length ?? 0
+    d.log({ kind: 'send', detail: `site=${adapter.site} user=${u}ch asst=${a}ch ${reason}` })
+  }
 
   sendCaptureToExtension({
     site: adapter.site,
@@ -122,8 +171,30 @@ function sendCaptureToExtension(payload) {
         type: 'VIJIA_CAPTURE',
         payload
       },
-      () => {
-        void chrome.runtime.lastError
+      (response) => {
+        const d = debug()
+        if (d?.isEnabled()) {
+          if (chrome.runtime.lastError) {
+            d.log({
+              kind: 'bridge',
+              detail: `error: ${chrome.runtime.lastError.message ?? 'unknown'}`
+            })
+            return
+          }
+          if (response?.ok) {
+            d.log({
+              kind: 'bridge',
+              detail: `ok http ${response.status ?? ''}`.trim()
+            })
+          } else {
+            d.log({
+              kind: 'bridge',
+              detail: `fail http ${response?.status ?? '?'} ${response?.error ?? ''}`.trim()
+            })
+          }
+        } else {
+          void chrome.runtime.lastError
+        }
       }
     )
     if (maybePromise != null && typeof maybePromise.then === 'function') {
@@ -137,6 +208,8 @@ function sendCaptureToExtension(payload) {
  * @param {string} reason app-switch | tab-switch | typing-stop | scroll-pause | typing-start
  */
 function scheduleCapture(reason) {
+  logDebugSchedule(reason)
+
   if (captureTimer !== null) {
     window.clearTimeout(captureTimer)
   }
@@ -150,6 +223,7 @@ function scheduleCapture(reason) {
 if (chrome.runtime?.id) {
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === 'VIJIA_SCHEDULE_CAPTURE' && typeof message.reason === 'string') {
+      debug()?.log({ kind: 'tab', detail: `schedule from bg: ${message.reason}` })
       scheduleCapture(message.reason)
       sendResponse({ ok: true })
       return true

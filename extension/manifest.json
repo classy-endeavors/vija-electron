@@ -33,7 +33,7 @@
         "https://perplexity.ai/*",
         "https://chat.deepseek.com/*"
       ],
-      "js": ["site-adapters.js", "content-script.js"],
+      "js": ["site-adapters.js", "debug-overlay.js", "content-script.js"],
       "run_at": "document_idle"
     }
   ]
