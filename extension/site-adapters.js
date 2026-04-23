@@ -80,27 +80,61 @@ const VIJIA_SITE_ADAPTERS = (() => {
   }
 
   /**
-   * Reads the latest user + assistant bubbles from the conversation column.
-   * Matches multiple ChatGPT DOM variants used on chatgpt.com (see public exporter patterns).
+   * Picks the message body inside a [data-message-author-role] node.
+   * chatgpt.com (2025+): user text lives under .user-message-bubble-color (often .whitespace-pre-wrap);
+   * assistant uses div.markdown / .prose (no [data-message-content] in the common layout).
    */
-  function extractChatGptConversationPair() {
-    const turnRoots = document.querySelectorAll('[data-message-author-role]')
-    if (!turnRoots.length) {
-      return null
+  function getChatGptTextForRoleNode(turn) {
+    const role = turn.getAttribute('data-message-author-role')
+    if (role === 'user') {
+      const legacy = turn.querySelector('[data-message-content]')
+      if (legacy) {
+        const t = normalizeMessageText(legacy.innerText ?? '')
+        if (t) {
+          return t
+        }
+      }
+      const bubble =
+        turn.querySelector('.user-message-bubble-color') ||
+        turn.querySelector('[class*="user-message-bubble"]')
+      if (bubble) {
+        const pre =
+          bubble.querySelector(
+            '.whitespace-pre-wrap, [class*="whitespace-pre-wrap"]'
+          ) || bubble
+        const t = normalizeMessageText(pre.innerText ?? '')
+        if (t) {
+          return t
+        }
+      }
+      return normalizeMessageText(turn.innerText ?? '')
     }
+    if (role === 'assistant') {
+      const fromData = turn.querySelector('[data-message-content]')
+      if (fromData) {
+        const t = normalizeMessageText(fromData.innerText ?? '')
+        if (t) {
+          return t
+        }
+      }
+      const md =
+        turn.querySelector('div.markdown, .markdown.prose, .markdown') ||
+        turn.querySelector('[class*="markdown"]')
+      if (md) {
+        return normalizeMessageText(md.innerText ?? '')
+      }
+      return normalizeMessageText(turn.innerText ?? '')
+    }
+    return ''
+  }
 
+  function buildChatGptLastPairFromTurns(turnEls) {
     let lastUser = ''
     const assistantTexts = []
 
-    turnRoots.forEach((turn) => {
+    turnEls.forEach((turn) => {
       const role = turn.getAttribute('data-message-author-role')
-      const contentRoot =
-        turn.querySelector('[data-message-content]') ||
-        turn.querySelector('[class*="markdown"]') ||
-        turn
-
-      let raw = contentRoot.innerText ?? ''
-      raw = normalizeMessageText(raw)
+      const raw = getChatGptTextForRoleNode(turn)
       if (!raw) {
         return
       }
@@ -136,6 +170,47 @@ const VIJIA_SITE_ADAPTERS = (() => {
     }
 
     return { user: lastUser, assistant: lastAssistant }
+  }
+
+  /** Prefers 2024+ thread layout: one <section data-testid="conversation-turn-…"> per turn. */
+  function extractChatGptByConversationTurns() {
+    const sections = document.querySelectorAll(
+      'section[data-testid^="conversation-turn-"]'
+    )
+    if (!sections.length) {
+      return null
+    }
+    const turnEls = []
+    for (const section of sections) {
+      const el = section.querySelector('[data-message-author-role]')
+      if (el) {
+        turnEls.push(el)
+      }
+    }
+    if (!turnEls.length) {
+      return null
+    }
+    return buildChatGptLastPairFromTurns(turnEls)
+  }
+
+  /**
+   * Fallback: walk all role nodes in document order (older layouts, tools UIs, iframes absent).
+   */
+  function extractChatGptByAuthorRoleNodes() {
+    const turnRoots = document.querySelectorAll('[data-message-author-role]')
+    if (!turnRoots.length) {
+      return null
+    }
+    return buildChatGptLastPairFromTurns(turnRoots)
+  }
+
+  function extractChatGptLastPair() {
+    return (
+      extractChatGptByConversationTurns() ??
+      extractChatGptByAuthorRoleNodes() ??
+      extractChatGptHeuristicPlaintext() ??
+      stableExtract(['You', 'User'], ['ChatGPT', 'Assistant'])
+    )
   }
 
   /**
@@ -187,11 +262,7 @@ const VIJIA_SITE_ADAPTERS = (() => {
         )
       },
       extractLastPair() {
-        return (
-          extractChatGptConversationPair() ??
-          extractChatGptHeuristicPlaintext() ??
-          stableExtract(['You', 'User'], ['ChatGPT', 'Assistant'])
-        )
+        return extractChatGptLastPair()
       }
     },
     {
